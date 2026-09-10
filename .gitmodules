@@ -1,0 +1,15 @@
+[submodule "third_party/cmsis-core"]
+	path = third_party/cmsis-core
+	url = https://github.com/ARM-software/CMSIS_5.git
+[submodule "third_party/cmsis-device-f4"]
+	path = third_party/cmsis-device-f4
+	url = https://github.com/STMicroelectronics/cmsis-device-f4.git
+[submodule "third_party/cmsis-device-h5"]
+	path = third_party/cmsis-device-h5
+	url = https://github.com/STMicroelectronics/cmsis-device-h5.git
+[submodule "third_party/cmsis-device-h7"]
+	path = third_party/cmsis-device-h7
+	url = https://github.com/STMicroelectronics/cmsis-device-h7.git
+[submodule "third_party/esp-idf"]
+	path = third_party/esp-idf
+	url = https://github.com/espressif/esp-idf.git

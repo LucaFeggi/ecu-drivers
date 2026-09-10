@@ -1,0 +1,7 @@
+.build/
+build/
+compile_commands.json
+
+# Target-local generated output and vendor checkout metadata.
+targets/*/generated/
+third_party/*/.git

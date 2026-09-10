@@ -1,0 +1,55 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "test",
+      "displayName": "Host tests",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.build/test",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "ECU_DRIVERS_BUILD_TESTS": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Host release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ECU_DRIVERS_BUILD_TESTS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "test", "configurePreset": "test" },
+    { "name": "release", "configurePreset": "release" }
+  ],
+  "testPresets": [
+    {
+      "name": "test",
+      "configurePreset": "test",
+      "output": { "outputOnFailure": true }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "test",
+      "steps": [
+        { "type": "configure", "name": "test" },
+        { "type": "build", "name": "test" },
+        { "type": "test", "name": "test" }
+      ]
+    },
+    {
+      "name": "release",
+      "steps": [
+        { "type": "configure", "name": "release" },
+        { "type": "build", "name": "release" }
+      ]
+    }
+  ]
+}
