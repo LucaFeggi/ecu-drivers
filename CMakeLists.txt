@@ -52,7 +52,7 @@ endif()
 add_subdirectory(devices)
 
 set(ECU_DRIVERS_TARGETS
-    "linux;stm32f446vet6;stm32g484ce;stm32h563vit6;stm32h723vgt6;esp32s3-wroom-1-n16r8"
+    "linux;stm32f446vet6;stm32g484ce;stm32h563vit6;stm32h723vgt6;esp32s3_wroom_1_n16r8"
     CACHE STRING "Concrete ecu-drivers targets to configure")
 set(_ecu_drivers_known_targets
     linux
@@ -60,7 +60,7 @@ set(_ecu_drivers_known_targets
     stm32g484ce
     stm32h563vit6
     stm32h723vgt6
-    esp32s3-wroom-1-n16r8)
+    esp32s3_wroom_1_n16r8)
 foreach(_target IN LISTS ECU_DRIVERS_TARGETS)
     if(NOT _target IN_LIST _ecu_drivers_known_targets)
         message(FATAL_ERROR "Unknown ecu-drivers target '${_target}'")
@@ -88,10 +88,10 @@ if(stm32h723vgt6 IN_LIST ECU_DRIVERS_TARGETS)
     add_subdirectory(platforms/stm32/h7)
     list(APPEND _ecu_drivers_export_targets hal-target-stm32h723vgt6)
 endif()
-if(esp32s3-wroom-1-n16r8 IN_LIST ECU_DRIVERS_TARGETS)
+if(esp32s3_wroom_1_n16r8 IN_LIST ECU_DRIVERS_TARGETS)
     add_subdirectory(platforms/esp32/s3)
     list(APPEND _ecu_drivers_export_targets
-         hal-target-esp32s3-wroom-1-n16r8)
+         hal-target-esp32s3_wroom_1_n16r8)
 endif()
 
 if(ECU_DRIVERS_BUILD_TESTS AND BUILD_TESTING)

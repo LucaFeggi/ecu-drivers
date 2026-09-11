@@ -104,7 +104,7 @@ hal::stm32f446vet6
 hal::stm32g484ce
 hal::stm32h563vit6
 hal::stm32h723vgt6
-hal::esp32s3-wroom-1-n16r8
+hal::esp32s3_wroom_1_n16r8
 ```
 
 Firmware composition should link only the selected concrete target. Core
