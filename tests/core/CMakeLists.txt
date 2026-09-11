@@ -29,7 +29,7 @@ function(hal_core_add_test test_name source_file)
     endif()
 
     add_test(NAME ${test_name} COMMAND ${test_name})
-    set_tests_properties(${test_name} PROPERTIES LABELS "unit;portable")
+    set_tests_properties(${test_name} PROPERTIES LABELS "host_validated")
 endfunction()
 
 hal_core_add_test(hal_core_contract_adc ../contracts/adc.cpp)

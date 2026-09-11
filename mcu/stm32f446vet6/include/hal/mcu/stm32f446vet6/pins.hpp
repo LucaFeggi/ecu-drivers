@@ -13,4 +13,4 @@ struct pin {
   [[nodiscard]] constexpr bool valid() const noexcept { return number < 16U; }
 };
 
-} // namespace hal::stm32f4::device::stm32f446vet6
+}  // namespace hal::stm32f4::device::stm32f446vet6

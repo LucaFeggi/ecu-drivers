@@ -17,9 +17,8 @@ struct capabilities {
   static constexpr std::uint8_t fdcan_instances{2U};
   static constexpr bool ethernet_mac{true};
   static constexpr std::uint8_t sdmmc_instances{2U};
-  static constexpr std::uint8_t gpdma_instances{2U};
   static constexpr bool adc_timer_triggered_dma{true};
   static constexpr std::uint8_t flash_wait_state_limit{8U};
 };
 
-} // namespace hal::stm32h5::device::stm32h563vit6
+}  // namespace hal::stm32h5::device::stm32h563vit6

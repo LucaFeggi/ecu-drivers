@@ -91,7 +91,7 @@ private:
   static constexpr std::uint32_t start{1U << 8U};
   static constexpr std::uint32_t stop{1U << 9U};
   static constexpr std::uint32_t ack{1U << 10U};
-  static constexpr std::uint32_t pe{1U};
+  static constexpr std::uint32_t pos{1U << 11U};
   static constexpr std::uint32_t sb{1U << 0U};
   static constexpr std::uint32_t addr{1U << 1U};
   static constexpr std::uint32_t btf{1U << 2U};
@@ -105,12 +105,14 @@ private:
       -> result<void, error_type> {
     abort_dma();
     registers_.CR1 |= stop;
+    clear_errors();
     return result<void, error_type>::failure(error{k});
   }
   template <class T>
   [[nodiscard]] auto failure(hal::i2c::error_kind k) -> result<T, error_type> {
     abort_dma();
     registers_.CR1 |= stop;
+    clear_errors();
     return result<T, error_type>::failure(error{k});
   }
   template <class A> static constexpr bool valid_address(A a) noexcept {
@@ -141,6 +143,76 @@ private:
            : (s & berr) != 0U ? hal::i2c::error_kind::bus_error
                               : hal::i2c::error_kind::timeout;
   }
+  void clear_errors() noexcept {
+    registers_.SR1 = registers_.SR1 & ~(berr | arlo | af);
+  }
+  void clear_address() noexcept {
+    (void)registers_.SR1;
+    (void)registers_.SR2;
+  }
+  void finish_receive(bool last) noexcept {
+    registers_.CR1 |= last ? stop : start;
+  }
+  [[nodiscard]] auto receive_polling(const hal::i2c::operation &op, bool last)
+      -> result<void, error_type> {
+    const std::size_t count = op.size();
+    if (count == 0U) {
+      registers_.CR1 &= ~ack;
+      clear_address();
+      finish_receive(last);
+      registers_.CR1 |= ack;
+      return result<void, error_type>::success();
+    }
+    if (count == 1U) {
+      registers_.CR1 &= ~ack;
+      clear_address();
+      finish_receive(last);
+      if (!wait(rxne))
+        return failure<void>(observed());
+      op.read_buffer()[0U] = static_cast<std::byte>(registers_.DR & 0xFFU);
+      registers_.CR1 |= ack;
+      return result<void, error_type>::success();
+    }
+    if (count == 2U) {
+      registers_.CR1 |= pos;
+      registers_.CR1 &= ~ack;
+      clear_address();
+      if (!wait(btf)) {
+        registers_.CR1 &= ~pos;
+        return failure<void>(observed());
+      }
+      finish_receive(last);
+      op.read_buffer()[0U] = static_cast<std::byte>(registers_.DR & 0xFFU);
+      op.read_buffer()[1U] = static_cast<std::byte>(registers_.DR & 0xFFU);
+      registers_.CR1 &= ~pos;
+      registers_.CR1 |= ack;
+      return result<void, error_type>::success();
+    }
+
+    registers_.CR1 |= ack;
+    clear_address();
+    std::size_t index = 0U;
+    while (count - index > 3U) {
+      if (!wait(rxne))
+        return failure<void>(observed());
+      op.read_buffer()[index] =
+          static_cast<std::byte>(registers_.DR & 0xFFU);
+      ++index;
+    }
+    if (!wait(btf))
+      return failure<void>(observed());
+    registers_.CR1 &= ~ack;
+    op.read_buffer()[index] = static_cast<std::byte>(registers_.DR & 0xFFU);
+    ++index;
+    if (!wait(btf))
+      return failure<void>(observed());
+    finish_receive(last);
+    op.read_buffer()[index] = static_cast<std::byte>(registers_.DR & 0xFFU);
+    ++index;
+    op.read_buffer()[index] = static_cast<std::byte>(registers_.DR & 0xFFU);
+    registers_.CR1 |= ack;
+    return result<void, error_type>::success();
+  }
   template <class A>
   [[nodiscard]] auto run(A a, const hal::i2c::operation &op, bool last)
       -> result<void, error_type> {
@@ -155,7 +227,7 @@ private:
           static_cast<std::uint8_t>(0xF0U | ((a.value >> 7U) & 0x06U));
       if (!wait(addr))
         return failure<void>(observed());
-      (void)registers_.SR2;
+      clear_address();
       registers_.DR = static_cast<std::uint8_t>(a.value & 0xFFU);
       if (!wait(btf))
         return failure<void>(observed());
@@ -167,18 +239,28 @@ private:
             static_cast<std::uint8_t>(0xF1U | ((a.value >> 7U) & 0x06U));
         if (!wait(addr))
           return failure<void>(observed());
-        (void)registers_.SR2;
       }
     } else {
       registers_.DR = address(a) | (read ? 1U : 0U);
       if (!wait(addr))
         return failure<void>(observed());
-      (void)registers_.SR2;
+      if (!read)
+        clear_address();
     }
     const auto count = op.size();
     if (count > 65'535U)
       return failure<void>(hal::i2c::error_kind::configuration);
-    if (config_.use_dma && tx_ != nullptr && rx_ != nullptr && count != 0U) {
+    const bool dma_receive = read && config_.use_dma && tx_ != nullptr &&
+                             rx_ != nullptr && count > 2U;
+    if (dma_receive) {
+      configure_dma(op, count);
+      clear_address();
+      if (!wait_dma(op.dir()))
+        return failure<void>(hal::i2c::error_kind::timeout);
+      finish_receive(last);
+      registers_.CR1 |= ack;
+    } else if (!read && config_.use_dma && tx_ != nullptr && rx_ != nullptr &&
+               count != 0U) {
       configure_dma(op, count);
       if (!wait_dma(op.dir()))
         return failure<void>(hal::i2c::error_kind::timeout);
@@ -189,21 +271,13 @@ private:
             return failure<void>(observed());
           registers_.DR = std::to_integer<std::uint8_t>(op.write_buffer()[i]);
         }
-      else {
-        for (std::size_t i = 0U; i < count; ++i) {
-          if (i + 1U == count)
-            registers_.CR1 &= ~ack;
-          if (!wait(rxne))
-            return failure<void>(observed());
-          op.read_buffer()[i] = static_cast<std::byte>(registers_.DR & 0xFFU);
-        }
-        registers_.CR1 |= ack;
-      }
+      else
+        return receive_polling(op, last);
     }
     if ((!read && !wait(btf)) && count != 0U)
       return failure<void>(observed());
     abort_dma();
-    if (last)
+    if (last && !read)
       registers_.CR1 |= stop;
     return result<void, error_type>::success();
   }

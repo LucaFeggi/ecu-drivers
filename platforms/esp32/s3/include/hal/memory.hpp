@@ -10,8 +10,10 @@
 #define ECU_ESP32S3_DRAM
 #endif
 
-namespace hal::esp32s3_wroom_1_n16r8::device {
+namespace hal::esp32s3_wroom_1_n16r8::memory {
 
+// These are target-level storage helpers for DMA/cache and flash-execution
+// policy. They are not exact module identity or memory-capacity facts.
 template <class T>
 struct alignas(4) dma_object {
   T value{};
@@ -22,4 +24,4 @@ struct alignas(4) dma_array {
   T values[N]{};
 };
 
-}  // namespace hal::esp32s3_wroom_1_n16r8::device
+}  // namespace hal::esp32s3_wroom_1_n16r8::memory

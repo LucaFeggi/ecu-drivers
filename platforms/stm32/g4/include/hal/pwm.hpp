@@ -31,6 +31,15 @@ private:
 
 struct no_dead_time {};
 
+struct timer_period_state {
+  void reset() noexcept { *this = {}; }
+  const volatile void *timer{};
+  std::uint32_t prescaler{};
+  std::uint32_t auto_reload{};
+  hal::nanoseconds actual_period{};
+  bool configured{};
+};
+
 struct default_compare_accessor {
   template <class Registers>
   [[nodiscard]] static volatile std::uint32_t &get(Registers &registers,
@@ -61,6 +70,8 @@ public:
   using error_type = error;
 
   explicit Output(Registers &registers) noexcept : registers_{registers} {}
+  Output(Registers &registers, timer_period_state &period) noexcept
+      : registers_{registers}, period_{&period} {}
 
   Output(const Output &) = delete;
   Output &operator=(const Output &) = delete;
@@ -110,9 +121,18 @@ public:
       return failure_period(hal::pwm::error_kind::unrepresentable);
     }
 
-    registers_.CR1 = registers_.CR1 & ~counter_enable;
-    registers_.PSC = best_psc;
-    registers_.ARR = best_arr;
+    const bool reuse_shared_period = period_ != nullptr && period_->configured;
+    if (reuse_shared_period &&
+        (period_->timer != &registers_ || period_->prescaler != best_psc ||
+         period_->auto_reload != best_arr || registers_.PSC != best_psc ||
+         registers_.ARR != best_arr)) {
+      return failure_period(hal::pwm::error_kind::shared_period_conflict);
+    }
+    if (!reuse_shared_period) {
+      registers_.CR1 = registers_.CR1 & ~counter_enable;
+      registers_.PSC = best_psc;
+      registers_.ARR = best_arr;
+    }
     configure_compare_mode();
     CompareAccessor::get(registers_, Channel) = 0U;
     const std::uint32_t shift = (Channel - 1U) * 4U;
@@ -123,10 +143,15 @@ public:
     }
     registers_.CCER = ccer;
     registers_.CR1 = registers_.CR1 | auto_reload_preload;
-    registers_.EGR = update_generation;
+    if (!reuse_shared_period) {
+      registers_.EGR = update_generation;
+    }
     configured_ = true;
     enabled_ = false;
     actual_period_ = period_for(best_psc, best_arr);
+    if (period_ != nullptr && !period_->configured) {
+      *period_ = {&registers_, best_psc, best_arr, actual_period_, true};
+    }
     return result<hal::nanoseconds, error_type>::success(actual_period_);
   }
 
@@ -221,7 +246,8 @@ private:
       constexpr std::uint32_t slot_shift = ((Channel - 1U) % 2U) * 8U;
       constexpr std::uint32_t mode_shift = slot_shift + 4U;
       constexpr std::uint32_t channel_select_mask = 0x3U << slot_shift;
-      constexpr std::uint32_t mode_mask = 0x1007U << mode_shift;
+      constexpr std::uint32_t mode_mask =
+          (0x7U << mode_shift) | (1U << (16U + slot_shift));
       constexpr std::uint32_t preload = 1U << (slot_shift + 3U);
       if constexpr (Channel <= 2U) {
         registers_.CCMR1 = (registers_.CCMR1 &
@@ -275,6 +301,7 @@ private:
   }
 
   Registers &registers_;
+  timer_period_state *period_{};
   hal::nanoseconds actual_period_{};
   bool configured_{};
   bool enabled_{};

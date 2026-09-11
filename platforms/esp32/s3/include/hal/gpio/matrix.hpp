@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/pins.hpp>
+#include <hal/gpio/pin_capabilities.hpp>
 #include <hal/foundation/result.hpp>
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -81,8 +81,10 @@ class matrix_error {
 
 [[nodiscard]] inline result<void, matrix_error> connect_input(
     gpio_dev_t& gpio, std::uint8_t pin, signal selected,
-    bool invert = false) noexcept {
-  if (!device::is_valid_gpio(pin) || selected.index >= 256U) {
+    bool invert = false,
+    const hal::esp32s3::gpio::pin_capabilities& pins =
+        hal::esp32s3::gpio::supported_module_pins) noexcept {
+  if (!pins.valid(pin) || selected.index >= 256U) {
     return result<void, matrix_error>::failure(matrix_error::unavailable());
   }
 
@@ -97,8 +99,10 @@ class matrix_error {
 
 [[nodiscard]] inline result<void, matrix_error> connect_output(
     gpio_dev_t& gpio, std::uint8_t pin, signal selected,
-    bool invert = false, bool peripheral_output_enable = true) noexcept {
-  if (!device::is_output_capable(pin) || selected.index >= 512U) {
+    bool invert = false, bool peripheral_output_enable = true,
+    const hal::esp32s3::gpio::pin_capabilities& pins =
+        hal::esp32s3::gpio::supported_module_pins) noexcept {
+  if (!pins.output_capable(pin) || selected.index >= 512U) {
     return result<void, matrix_error>::failure(matrix_error::unavailable());
   }
 
@@ -120,12 +124,14 @@ class matrix_error {
 
 [[nodiscard]] inline result<void, matrix_error> connect_bidirectional(
     gpio_dev_t& gpio, std::uint8_t pin, signal selected,
-    bool invert = false) noexcept {
-  const auto output = connect_output(gpio, pin, selected, invert, true);
+    bool invert = false,
+    const hal::esp32s3::gpio::pin_capabilities& pins =
+        hal::esp32s3::gpio::supported_module_pins) noexcept {
+  const auto output = connect_output(gpio, pin, selected, invert, true, pins);
   if (!output) {
     return output;
   }
-  return connect_input(gpio, pin, selected, invert);
+  return connect_input(gpio, pin, selected, invert, pins);
 }
 
 }  // namespace hal::esp32s3_wroom_1_n16r8::gpio

@@ -32,6 +32,15 @@ private:
 
 struct no_dead_time {};
 
+struct timer_period_state {
+  void reset() noexcept { *this = {}; }
+  const volatile void *timer{};
+  std::uint32_t prescaler{};
+  std::uint32_t auto_reload{};
+  hal::nanoseconds actual_period{};
+  bool configured{};
+};
+
 struct default_compare_accessor {
   template <class Registers>
   [[nodiscard]] static volatile std::uint32_t &get(Registers &registers,
@@ -51,16 +60,19 @@ struct default_compare_accessor {
 
 template <class Registers, std::uint32_t TimerClockHz, unsigned Channel,
           class CompareAccessor = default_compare_accessor,
-          bool Complementary = false>
+          bool Complementary = false, unsigned CounterBits = 16U>
 class Output {
   static_assert(TimerClockHz > 0U);
   static_assert(Channel >= 1U && Channel <= 4U);
   static_assert(!Complementary || Channel <= 3U);
+  static_assert(CounterBits == 16U || CounterBits == 32U);
 
 public:
   using error_type = error;
 
   explicit Output(Registers &registers) noexcept : registers_{registers} {}
+  Output(Registers &registers, timer_period_state &period) noexcept
+      : registers_{registers}, period_{&period} {}
 
   Output(const Output &) = delete;
   Output &operator=(const Output &) = delete;
@@ -85,7 +97,7 @@ public:
       if (ticks == 0U) {
         ticks = 1U;
       }
-      if (ticks > 0x1'0000'0000ULL) {
+      if (ticks > counter_limit()) {
         continue;
       }
       const std::uint64_t actual_period = (denominator * ticks) / TimerClockHz;
@@ -106,10 +118,19 @@ public:
       return failure_period(hal::pwm::error_kind::unrepresentable);
     }
 
-    registers_.CR1 = registers_.CR1 & ~counter_enable;
-    registers_.PSC = best_psc;
-    registers_.ARR = best_arr;
-    registers_.EGR = update_generation;
+    const bool reuse_shared_period = period_ != nullptr && period_->configured;
+    if (reuse_shared_period &&
+        (period_->timer != &registers_ || period_->prescaler != best_psc ||
+         period_->auto_reload != best_arr || registers_.PSC != best_psc ||
+         registers_.ARR != best_arr)) {
+      return failure_period(hal::pwm::error_kind::shared_period_conflict);
+    }
+    if (!reuse_shared_period) {
+      registers_.CR1 = registers_.CR1 & ~counter_enable;
+      registers_.PSC = best_psc;
+      registers_.ARR = best_arr;
+    }
+    configure_compare_mode();
     CompareAccessor::get(registers_, Channel) = 0U;
     const std::uint32_t shift = (Channel - 1U) * 4U;
     const std::uint32_t mask = 0xFU << shift;
@@ -119,9 +140,15 @@ public:
     }
     registers_.CCER = ccer;
     registers_.CR1 = registers_.CR1 | auto_reload_preload;
+    if (!reuse_shared_period) {
+      registers_.EGR = update_generation;
+    }
     configured_ = true;
     enabled_ = false;
     actual_period_ = period_for(best_psc, best_arr);
+    if (period_ != nullptr && !period_->configured) {
+      *period_ = {&registers_, best_psc, best_arr, actual_period_, true};
+    }
     return result<hal::nanoseconds, error_type>::success(actual_period_);
   }
 
@@ -137,8 +164,12 @@ public:
     std::uint64_t ticks = (numerator + denominator / 2U) / denominator;
     const std::uint64_t period_ticks =
         static_cast<std::uint64_t>(registers_.ARR) + 1U;
+    const std::uint64_t maximum_compare = counter_limit() - 1U;
     if (ticks > period_ticks) {
       ticks = period_ticks;
+    }
+    if (ticks > maximum_compare) {
+      ticks = maximum_compare;
     }
     CompareAccessor::get(registers_, Channel) =
         static_cast<std::uint32_t>(ticks);
@@ -204,6 +235,33 @@ private:
     bool valid{};
   };
 
+  [[nodiscard]] static constexpr std::uint64_t counter_limit() noexcept {
+    return CounterBits == 16U ? 0x1'0000ULL : 0x1'0000'0000ULL;
+  }
+
+  void configure_compare_mode() noexcept {
+    if constexpr (requires(Registers &value) {
+                    value.CCMR1;
+                    value.CCMR2;
+                  }) {
+      constexpr std::uint32_t slot_shift = ((Channel - 1U) % 2U) * 8U;
+      constexpr std::uint32_t mode_shift = slot_shift + 4U;
+      constexpr std::uint32_t channel_select_mask = 0x3U << slot_shift;
+      constexpr std::uint32_t mode_mask =
+          (0x7U << mode_shift) | (1U << (16U + slot_shift));
+      constexpr std::uint32_t preload = 1U << (slot_shift + 3U);
+      if constexpr (Channel <= 2U) {
+        registers_.CCMR1 =
+            (registers_.CCMR1 & ~(channel_select_mask | mode_mask)) |
+            (6U << mode_shift) | preload;
+      } else {
+        registers_.CCMR2 =
+            (registers_.CCMR2 & ~(channel_select_mask | mode_mask)) |
+            (6U << mode_shift) | preload;
+      }
+    }
+  }
+
   [[nodiscard]] static constexpr dead_time_result
   dead_time_code(std::uint64_t ticks) noexcept {
     if (ticks <= 127U) {
@@ -246,6 +304,7 @@ private:
   }
 
   Registers &registers_;
+  timer_period_state *period_{};
   hal::nanoseconds actual_period_{};
   bool configured_{};
   bool enabled_{};

@@ -1,4 +1,4 @@
-# hal-target-stm32h5
+# STM32H5 platform
 
 Direct-register STM32H5 target drivers. Exact device and package facts are
 supplied separately by the selected chip profile.

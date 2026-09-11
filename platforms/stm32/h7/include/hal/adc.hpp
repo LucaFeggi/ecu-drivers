@@ -440,6 +440,9 @@ public:
     clear_dma_flags();
     fault_.store(static_cast<std::uint32_t>(acquisition_fault::none),
                  std::memory_order_release);
+    pending_halves_.store(0U, std::memory_order_release);
+    first_half_generation_.store(0U, std::memory_order_release);
+    second_half_generation_.store(0U, std::memory_order_release);
     stream_.NDTR = static_cast<std::uint32_t>(DmaSampleCount);
     next_timestamp_ns_ =
         epoch.nanoseconds_since_boot + configuration_.sample_period_ns;
@@ -471,8 +474,11 @@ public:
     return result<void, error_type>::success();
   }
 
-  // Call only from the selected DMA stream's IRQ. The DMA storage must be
-  // coherent before this function executes (the BSP's MPU policy provides it).
+  // Call only from the selected DMA stream's IRQ. This path has constant
+  // execution time: it acknowledges hardware and records completed halves.
+  // Copying and publication are deferred to service_dma_completions(), which
+  // latest()/try_read() invoke from task context. The DMA storage must be
+  // coherent (normally by an MPU non-cacheable region on H7).
   void on_dma_interrupt() noexcept {
     barrier();
     const std::uint32_t flags = dma_.LISR;
@@ -494,14 +500,56 @@ public:
                    std::memory_order_release);
     }
     if ((flags & dma_half_transfer) != 0U) {
-      publish_half(0U);
+      first_half_generation_.fetch_add(1U, std::memory_order_relaxed);
+      const std::uint32_t previous =
+          pending_halves_.fetch_or(first_half_pending,
+                                   std::memory_order_release);
+      if ((previous & first_half_pending) != 0U) {
+        fault_.store(static_cast<std::uint32_t>(acquisition_fault::adc_overrun),
+                     std::memory_order_release);
+      }
     }
     if ((flags & dma_transfer_complete) != 0U) {
-      publish_half(DmaSampleCount / 2U);
+      second_half_generation_.fetch_add(1U, std::memory_order_relaxed);
+      const std::uint32_t previous =
+          pending_halves_.fetch_or(second_half_pending,
+                                   std::memory_order_release);
+      if ((previous & second_half_pending) != 0U) {
+        fault_.store(static_cast<std::uint32_t>(acquisition_fault::adc_overrun),
+                     std::memory_order_release);
+      }
     }
   }
 
+  // Task-context maintenance. It must run at least once per complete DMA
+  // buffer period. A generation change while a half is copied is detected as
+  // overrun so consumers never accept a silently torn sample block.
+  [[nodiscard]] auto service_dma_completions()
+      -> result<void, error_type> {
+    const std::uint32_t pending =
+        pending_halves_.exchange(0U, std::memory_order_acq_rel);
+    if ((pending & first_half_pending) != 0U &&
+        !publish_stable_half(0U, first_half_generation_)) {
+      return fail(acquisition_fault::adc_overrun,
+                  hal::adc::error_kind::overrun);
+    }
+    if ((pending & second_half_pending) != 0U &&
+        !publish_stable_half(DmaSampleCount / 2U, second_half_generation_)) {
+      return fail(acquisition_fault::adc_overrun,
+                  hal::adc::error_kind::overrun);
+    }
+    const acquisition_fault observed = fault();
+    return observed == acquisition_fault::none
+               ? result<void, error_type>::success()
+               : result<void, error_type>::failure(error{fault_kind(observed)});
+  }
+
   [[nodiscard]] auto latest() -> result<hal::adc::raw_sample, error_type> {
+    const auto serviced = service_dma_completions();
+    if (!serviced) {
+      return result<hal::adc::raw_sample, error_type>::failure(
+          serviced.error());
+    }
     const acquisition_fault observed_fault = fault();
     if (observed_fault != acquisition_fault::none) {
       return result<hal::adc::raw_sample, error_type>::failure(
@@ -543,6 +591,11 @@ public:
 
   [[nodiscard]] auto try_read(hal::span<hal::adc::raw_sample> output)
       -> result<hal::adc::stream_read, error_type> {
+    const auto serviced = service_dma_completions();
+    if (!serviced) {
+      return result<hal::adc::stream_read, error_type>::failure(
+          serviced.error());
+    }
     const acquisition_fault observed_fault = fault();
     if (observed_fault != acquisition_fault::none) {
       return result<hal::adc::stream_read, error_type>::failure(
@@ -609,6 +662,8 @@ private:
       dma_half_transfer | dma_transfer_complete};
   static constexpr std::uint32_t dma_error_flags{
       dma_fifo_error | dma_direct_mode_error | dma_transfer_error};
+  static constexpr std::uint32_t first_half_pending{1U << 0U};
+  static constexpr std::uint32_t second_half_pending{1U << 1U};
 
   [[nodiscard]] static std::uint32_t
   pointer_word(const volatile void *pointer) noexcept {
@@ -752,13 +807,18 @@ private:
            oversampling_code(configuration_.oversampling_ratio) != 0xFFU;
   }
 
-  void publish_half(std::size_t first) noexcept {
+  [[nodiscard]] bool
+  publish_stable_half(std::size_t first,
+                      const std::atomic<std::uint32_t> &generation) noexcept {
+    const std::uint32_t before = generation.load(std::memory_order_acquire);
     constexpr std::size_t half = DmaSampleCount / 2U;
     for (std::size_t index = 0U; index < half; ++index) {
       publication_.publish_from_isr(buffer_[first + index],
                                     instant{next_timestamp_ns_});
       next_timestamp_ns_ += configuration_.sample_period_ns;
     }
+    barrier();
+    return before == generation.load(std::memory_order_acquire);
   }
 
   [[nodiscard]] static hal::adc::error_kind
@@ -805,6 +865,9 @@ private:
   ContinuousChannel<Characteristics, QueueCapacity> publication_{};
   std::uint64_t next_timestamp_ns_{};
   std::atomic<std::uint32_t> fault_{};
+  std::atomic<std::uint32_t> pending_halves_{};
+  std::atomic<std::uint32_t> first_half_generation_{};
+  std::atomic<std::uint32_t> second_half_generation_{};
   bool initialized_{};
   bool running_{};
 };

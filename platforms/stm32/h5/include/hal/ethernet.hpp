@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <hal/foundation/dma.hpp>
 #include "support.hpp"
 
 namespace hal::stm32h5::ethernet {
@@ -183,7 +184,7 @@ private:
   Mdio &mdio_;
 };
 
-struct alignas(4U) descriptor {
+struct alignas(16U) descriptor {
   volatile std::uint32_t DESC0{};
   volatile std::uint32_t DESC1{};
   volatile std::uint32_t DESC2{};
@@ -191,6 +192,7 @@ struct alignas(4U) descriptor {
 };
 
 static_assert(sizeof(descriptor) == 16U);
+static_assert(alignof(descriptor) == 16U);
 
 struct mac_config {
   std::uint16_t maximum_frame_size{1536U};
@@ -200,7 +202,8 @@ struct mac_config {
 };
 
 template <class Registers, std::size_t TxCount, std::size_t RxCount,
-          std::size_t BufferSize = 1536U>
+          std::size_t BufferSize = 1536U,
+          hal::DmaCoherencyPolicy DmaPolicy = hal::coherent_dma_policy>
 class Mac {
   static_assert(TxCount > 0U && RxCount > 0U);
   static_assert(BufferSize >= 64U);
@@ -212,10 +215,11 @@ public:
       descriptor (&rx_descriptors)[RxCount],
       std::array<std::byte, TxCount * BufferSize> &tx_buffers,
       std::array<std::byte, RxCount * BufferSize> &rx_buffers,
-      mac_config configuration) noexcept
+      mac_config configuration, DmaPolicy dma_policy = {}) noexcept
       : registers_{registers}, tx_descriptors_{tx_descriptors},
         rx_descriptors_{rx_descriptors}, tx_buffers_{tx_buffers},
-        rx_buffers_{rx_buffers}, configuration_{configuration} {}
+        rx_buffers_{rx_buffers}, configuration_{configuration},
+        dma_policy_{dma_policy} {}
 
   Mac(const Mac &) = delete;
   Mac &operator=(const Mac &) = delete;
@@ -229,7 +233,8 @@ public:
         (reinterpret_cast<std::uintptr_t>(tx_descriptors_) % 16U) != 0U ||
         (reinterpret_cast<std::uintptr_t>(rx_descriptors_) % 16U) != 0U ||
         (reinterpret_cast<std::uintptr_t>(tx_buffers_.data()) % 4U) != 0U ||
-        (reinterpret_cast<std::uintptr_t>(rx_buffers_.data()) % 4U) != 0U) {
+        (reinterpret_cast<std::uintptr_t>(rx_buffers_.data()) % 4U) != 0U ||
+        !dma_regions_valid()) {
       return failure(hal::ethernet::error_kind::io);
     }
     registers_.DMAMR = dma_software_reset;
@@ -249,6 +254,9 @@ public:
       rx_descriptors_[index].DESC2 = 0U;
       rx_descriptors_[index].DESC3 = descriptor_own | rx_buffer1_valid;
     }
+    dma_policy_.prepare_for_device(tx_descriptors_, sizeof(tx_descriptors_));
+    dma_policy_.prepare_for_device(rx_descriptors_, sizeof(rx_descriptors_));
+    dma_policy_.prepare_for_device(rx_buffers_.data(), rx_buffers_.size());
     registers_.DMACRDLAR = pointer_word(rx_descriptors_);
     registers_.DMACTDLAR = pointer_word(tx_descriptors_);
     registers_.DMACRDRLR = static_cast<std::uint32_t>(RxCount - 1U);
@@ -312,6 +320,7 @@ public:
           error{hal::ethernet::error_kind::frame_too_large});
     }
     descriptor &entry = tx_descriptors_[tx_index_];
+    dma_policy_.prepare_for_cpu(&entry, sizeof(entry));
     if ((entry.DESC3 & descriptor_own) != 0U) {
       return result<bool, error_type>::success(false);
     }
@@ -323,9 +332,10 @@ public:
     entry.DESC1 = 0U;
     entry.DESC2 =
         static_cast<std::uint32_t>(data.size()) & tx_buffer1_length_mask;
-    entry.DESC3 = tx_first_segment | tx_last_segment;
+    entry.DESC3 = tx_first_segment | tx_last_segment | descriptor_own;
+    dma_policy_.prepare_for_device(destination, data.size());
+    dma_policy_.prepare_for_device(&entry, sizeof(entry));
     barrier();
-    entry.DESC3 = entry.DESC3 | descriptor_own;
     tx_index_ = (tx_index_ + 1U) % TxCount;
     barrier();
     registers_.DMACTDTPR = pointer_word(&tx_descriptors_[tx_index_]);
@@ -339,6 +349,7 @@ public:
           error{hal::ethernet::error_kind::io});
     }
     descriptor &entry = rx_descriptors_[rx_index_];
+    dma_policy_.prepare_for_cpu(&entry, sizeof(entry));
     barrier();
     if ((entry.DESC3 & descriptor_own) != 0U) {
       return result<hal::ethernet::received_frame, error_type>::success(
@@ -363,6 +374,7 @@ public:
           error{hal::ethernet::error_kind::frame_too_large});
     }
     std::byte *source = rx_buffer(rx_index_);
+    dma_policy_.prepare_for_cpu(source, frame_size);
     for (std::size_t index = 0U; index < frame_size; ++index) {
       output[index] = source[index];
     }
@@ -439,6 +451,7 @@ private:
 
   void recycle_rx(descriptor &entry) noexcept {
     entry.DESC3 = descriptor_own | rx_buffer1_valid;
+    dma_policy_.prepare_for_device(&entry, sizeof(entry));
     barrier();
     rx_index_ = (rx_index_ + 1U) % RxCount;
     registers_.DMACRDTPR =
@@ -461,12 +474,20 @@ private:
     return result<void, error_type>::failure(error{kind});
   }
 
+  [[nodiscard]] bool dma_regions_valid() const noexcept {
+    return dma_policy_.valid_region(tx_descriptors_, sizeof(tx_descriptors_)) &&
+           dma_policy_.valid_region(rx_descriptors_, sizeof(rx_descriptors_)) &&
+           dma_policy_.valid_region(tx_buffers_.data(), tx_buffers_.size()) &&
+           dma_policy_.valid_region(rx_buffers_.data(), rx_buffers_.size());
+  }
+
   Registers &registers_;
   descriptor (&tx_descriptors_)[TxCount];
   descriptor (&rx_descriptors_)[RxCount];
   std::array<std::byte, TxCount * BufferSize> &tx_buffers_;
   std::array<std::byte, RxCount * BufferSize> &rx_buffers_;
   mac_config configuration_{};
+  DmaPolicy dma_policy_{};
   hal::ethernet::mac_address address_{};
   std::size_t tx_index_{};
   std::size_t rx_index_{};

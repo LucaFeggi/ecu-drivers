@@ -67,25 +67,37 @@ struct timing {
          ((value & 0xFF000000U) >> 24U);
 }
 
-[[nodiscard]] constexpr timing find_timing(config configuration) noexcept {
+[[nodiscard]] constexpr timing find_timing(
+    config configuration, std::uint32_t source_hz = 80'000'000U) noexcept {
   timing selected{};
   std::uint64_t best_bitrate_error = UINT64_MAX;
   std::uint32_t best_sample_error = UINT32_MAX;
-  if (configuration.bitrate.value == 0U ||
+  if (source_hz == 0U || configuration.bitrate.value == 0U ||
       configuration.sample_point_per_mille == 0U ||
       configuration.sample_point_per_mille >= 1'000U) {
     return selected;
   }
 
-  for (std::uint32_t prescaler = 2U; prescaler <= 16'384U;
-       prescaler += 2U) {
-    for (std::uint32_t segment_one = 1U; segment_one <= 16U;
-         ++segment_one) {
-      for (std::uint32_t segment_two = 1U; segment_two <= 8U;
-           ++segment_two) {
-        const std::uint32_t time_quanta = segment_one + segment_two + 1U;
-        const std::uint32_t actual =
-            80'000'000U / (prescaler * time_quanta);
+  for (std::uint32_t segment_one = 1U; segment_one <= 16U;
+       ++segment_one) {
+    for (std::uint32_t segment_two = 1U; segment_two <= 8U;
+         ++segment_two) {
+      const std::uint32_t time_quanta = segment_one + segment_two + 1U;
+      const std::uint64_t denominator =
+          configuration.bitrate.value * time_quanta;
+      std::uint32_t nearest = static_cast<std::uint32_t>(
+          (static_cast<std::uint64_t>(source_hz) + denominator / 2U) /
+          denominator);
+      if ((nearest & 1U) != 0U) {
+        ++nearest;
+      }
+      const std::uint32_t candidates[2U]{nearest,
+                                         nearest >= 4U ? nearest - 2U : 0U};
+      for (const std::uint32_t prescaler : candidates) {
+        if (prescaler < 2U || prescaler > 16'384U) {
+          continue;
+        }
+        const std::uint32_t actual = source_hz / (prescaler * time_quanta);
         if (actual == 0U) {
           continue;
         }
@@ -134,10 +146,7 @@ class Controller {
   Controller& operator=(const Controller&) = delete;
 
   [[nodiscard]] result<hertz, error_type> configure(config configuration) noexcept {
-    if (SourceHz != 80'000'000U) {
-      return result<hertz, error_type>::failure(error_type::configuration());
-    }
-    const timing selected = find_timing(configuration);
+    const timing selected = find_timing(configuration, SourceHz);
     if (selected.bitrate == 0U) {
       return result<hertz, error_type>::failure(error_type::configuration());
     }
@@ -326,6 +335,19 @@ class Controller {
 
   [[nodiscard]] bool bus_off() const noexcept {
     return (peripheral_->status_reg.val & (1U << 7U)) != 0U;
+  }
+
+  // A bus-off condition automatically places the ESP32-S3 TWAI controller in
+  // reset mode. Exiting reset mode starts the hardware-defined recovery wait
+  // for 128 bus-free occurrences. Completion remains observable through
+  // bus_off(); queued frames are caller-owned, so there is no hidden queue to
+  // discard here.
+  [[nodiscard]] result<void, error_type> initiate_bus_off_recovery() noexcept {
+    if (!configured_ || !bus_off()) {
+      return result<void, error_type>::failure(error_type::configuration());
+    }
+    peripheral_->mode_reg.rm = 0U;
+    return result<void, error_type>::success();
   }
 
  private:

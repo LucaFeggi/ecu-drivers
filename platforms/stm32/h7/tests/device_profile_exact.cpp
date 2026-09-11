@@ -211,6 +211,7 @@ struct delay_stub {
   (void)adc.start(hal::instant{});
   (void)adc.stop();
   adc.on_dma_interrupt();
+  (void)adc.service_dma_completions();
 
   using dma_serial = hal::stm32h7::serial::DmaPort<
       binding::serial_registers, binding::dma_stream_registers,
@@ -224,8 +225,9 @@ struct delay_stub {
   (void)serial.configure({hal::hertz{115'200U}});
   (void)serial.try_write({serial_tx.data(), 1U});
   (void)serial.try_read({serial_rx.data(), 1U});
-  serial.on_tx_dma_interrupt();
-  serial.on_rx_dma_interrupt();
+  serial.on_tx_dma_interrupt(true);
+  serial.on_rx_dma_interrupt(true);
+  (void)serial.fault();
 
   using dma_spi = hal::stm32h7::spi::DmaBus8<
       binding::spi_registers, binding::dma_stream_registers,
@@ -288,6 +290,12 @@ struct delay_stub {
   pwm_driver pwm{*TIM2};
   (void)pwm.configure({hal::nanoseconds{1'000U}, 1'000U,
                        hal::pwm::polarity::active_high});
+  (void)pwm.set_pulse_width(hal::nanoseconds{500U});
+  (void)pwm.enable_output();
+  (void)pwm.disable_output();
+  (void)pwm.set_dead_time(hal::nanoseconds{100U});
+  (void)pwm.enabled();
+  (void)pwm.actual_period();
   hal::stm32h7::rtc::Clock rtc{*RTC};
   (void)rtc.alarm_pending();
   hal::stm32h7::watchdog::Feeder<binding::watchdog_registers, 32'000U> watchdog{

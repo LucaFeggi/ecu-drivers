@@ -21,4 +21,4 @@ struct capabilities {
   static constexpr bool adc3_multi_channel_scan_reliable{false};
 };
 
-} // namespace hal::stm32h7::device::stm32h723vgt6
+}  // namespace hal::stm32h7::device::stm32h723vgt6

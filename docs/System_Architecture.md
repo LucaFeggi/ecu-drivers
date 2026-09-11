@@ -40,8 +40,9 @@ select MCU peripherals, pins, boards, or RTOS services.
 - `include/hal/adapters/` — allocation-free composition such as active-low
   GPIO, ADC averaging, journal memory, PWM duty-cycle, serial text output, and
   static SPI-device ownership.
-- `include/hal/foundation/` — result values, spans, units, assertions, and
-  small portable utilities.
+- `include/hal/foundation/` — result values, spans, units, assertions,
+  saturating monotonic deadlines, and caller-owned DMA storage/coherency
+  policies.
 - `platforms/linux/` — Linux integration through GPIO v2, i2c-dev, spidev,
   SocketCAN, TAP/AF_PACKET, IIO, termios, sysfs, RTC, watchdog, files, and
   block devices.
@@ -82,6 +83,17 @@ Drivers are independent of FreeRTOS. Synchronous contract calls complete with
 bounded polling or return a nonblocking result; continuous acquisition and
 receive paths expose explicit ISR publication/service boundaries.
 
+Drivers that can observe a running monotonic clock may use an absolute
+`hal::deadline`; frequency-dependent poll budgets remain valid for bounded
+early-startup sequences where no clock service exists. DMA-capable drivers do
+not assume cache coherence: the BSP either supplies a cache-line-aware
+`DmaCoherencyPolicy` or proves that the caller-owned region is hardware
+coherent/MPU-configured non-cacheable before using the no-op policy.
+
+Portable RTC alarms mean one absolute, future UTC deadline. Targets backed by
+calendar hardware filter recurring day-of-month matches in software and
+disarm the hardware alarm after the requested deadline is observed.
+
 ## CMake targets
 
 The repository exports only concrete device/module integration targets:
@@ -99,6 +111,11 @@ Firmware composition should link only the selected concrete target. Core
 contracts and external-device headers are implementation/package contents and
 are not separate target selections.
 
+`ECU_DRIVERS_TARGETS` controls configuration and installation. Install-tree
+tests build independent consumers against isolated include roots, so an exact
+profile cannot accidentally rely on a source-tree-relative family include or
+an unexported core/device dependency.
+
 ## Validation boundary
 
 Host tests validate portable contracts, adapters, Linux integration behavior,
@@ -109,3 +126,8 @@ execution policy, SD-card behavior, PHY negotiation, and external wiring.
 
 The target architecture documents under each `platforms/*/docs/` directory are
 the detailed driver-by-driver references for that implementation.
+
+CTest labels describe evidence rather than aspiration:
+`compile_validated`, `register_model_validated`, `host_validated`, and
+`hil_validated`. Only a runner that flashes real hardware and verifies the
+declared fixture may use the last label.

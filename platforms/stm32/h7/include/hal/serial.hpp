@@ -331,7 +331,8 @@ public:
     rx_dma_position_ = 0U;
     rx_produced_total_.store(0U, std::memory_order_release);
     rx_read_total_ = 0U;
-    fault_.store(hal::serial::error_kind::other, std::memory_order_release);
+    rx_fault_.store(hal::serial::error_kind::other, std::memory_order_release);
+    tx_fault_.store(hal::serial::error_kind::other, std::memory_order_release);
     tx_busy_.store(false, std::memory_order_release);
     registers_.CR3 = registers_.CR3 | cr3_rx_dma_enable;
     registers_.CR1 = cr1 | cr1_enabled;
@@ -350,6 +351,10 @@ public:
       return result<std::size_t, error_type>::failure(
           error{hal::serial::error_kind::io});
     }
+    const auto transmit_fault = tx_fault_.load(std::memory_order_acquire);
+    if (transmit_fault != hal::serial::error_kind::other) {
+      return result<std::size_t, error_type>::failure(error{transmit_fault});
+    }
     const std::size_t count = data.size() < TxCapacity ? data.size() : TxCapacity;
     if (count == 0U) {
       return result<std::size_t, error_type>::success(0U);
@@ -362,7 +367,8 @@ public:
     }
     if (!stop_tx_dma()) {
       tx_busy_.store(false, std::memory_order_release);
-      fault_.store(hal::serial::error_kind::timeout, std::memory_order_release);
+      tx_fault_.store(hal::serial::error_kind::timeout,
+                      std::memory_order_release);
       return result<std::size_t, error_type>::failure(
           error{hal::serial::error_kind::timeout});
     }
@@ -393,10 +399,11 @@ public:
       return result<std::size_t, error_type>::failure(
           error{hal::serial::error_kind::io});
     }
-    const auto observed_fault = fault_.load(std::memory_order_acquire);
+    const auto observed_fault = rx_fault_.load(std::memory_order_acquire);
     if (observed_fault != hal::serial::error_kind::other) {
       const auto observed = observed_fault;
-      fault_.store(hal::serial::error_kind::other, std::memory_order_release);
+      rx_fault_.store(hal::serial::error_kind::other,
+                      std::memory_order_release);
       return result<std::size_t, error_type>::failure(error{observed});
     }
     const hal::serial::error_kind receive_error = check_receive_error();
@@ -434,7 +441,7 @@ public:
       return result<void, error_type>::failure(
           error{hal::serial::error_kind::configuration});
     }
-    const auto observed_fault = fault_.load(std::memory_order_acquire);
+    const auto observed_fault = tx_fault_.load(std::memory_order_acquire);
     if (observed_fault != hal::serial::error_kind::other) {
       return result<void, error_type>::failure(
           error{observed_fault});
@@ -469,21 +476,21 @@ public:
     tx_stream_.CR = tx_stream_.CR & ~dma_enable;
     registers_.CR3 = registers_.CR3 & ~cr3_tx_dma_enable;
     if (transfer_error) {
-      fault_.store(hal::serial::error_kind::io, std::memory_order_release);
+      tx_fault_.store(hal::serial::error_kind::io, std::memory_order_release);
     }
     tx_busy_.store(false, std::memory_order_release);
   }
 
   void on_rx_dma_interrupt(bool transfer_error = false) noexcept {
     if (transfer_error) {
-      fault_.store(hal::serial::error_kind::io, std::memory_order_release);
+      rx_fault_.store(hal::serial::error_kind::io, std::memory_order_release);
       rx_stream_.CR = rx_stream_.CR & ~dma_enable;
       registers_.CR3 = registers_.CR3 & ~cr3_rx_dma_enable;
       return;
     }
     const hal::serial::error_kind observed = check_receive_error();
     if (observed != hal::serial::error_kind::other) {
-      fault_.store(observed, std::memory_order_release);
+      rx_fault_.store(observed, std::memory_order_release);
     }
     const std::size_t position =
         (RxCapacity - static_cast<std::size_t>(rx_stream_.NDTR % RxCapacity)) %
@@ -504,7 +511,10 @@ public:
     return tx_busy_.load(std::memory_order_acquire);
   }
   [[nodiscard]] hal::serial::error_kind fault() const noexcept {
-    return fault_.load(std::memory_order_acquire);
+    const auto receive = rx_fault_.load(std::memory_order_acquire);
+    return receive != hal::serial::error_kind::other
+               ? receive
+               : tx_fault_.load(std::memory_order_acquire);
   }
 
 private:
@@ -619,7 +629,10 @@ private:
   std::atomic<std::uint32_t> rx_produced_total_{};
   bool configured_{};
   std::atomic_bool tx_busy_{};
-  std::atomic<hal::serial::error_kind> fault_{hal::serial::error_kind::other};
+  std::atomic<hal::serial::error_kind> rx_fault_{
+      hal::serial::error_kind::other};
+  std::atomic<hal::serial::error_kind> tx_fault_{
+      hal::serial::error_kind::other};
 };
 
 } // namespace hal::stm32h7::serial

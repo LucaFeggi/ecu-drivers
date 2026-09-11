@@ -25,34 +25,53 @@ class error {
 
 template <std::uint32_t ClockHz = 16'000'000U>
 class MonotonicClock {
+  static_assert(ClockHz > 0U);
+
  public:
   using error_type = error;
 
-  explicit MonotonicClock(systimer_dev_t& systimer) noexcept
-      : systimer_{&systimer} {}
+  explicit MonotonicClock(systimer_dev_t& systimer,
+                          std::uint32_t poll_limit = 1'000U) noexcept
+      : systimer_{&systimer}, poll_limit_{poll_limit} {}
 
   [[nodiscard]] result<void, error_type> initialize() noexcept {
     systimer_->conf.clk_en = 1U;
     systimer_->conf.timer_unit0_work_en = 1U;
-    return result<void, error_type>::success();
+    std::uint64_t ticks{};
+    return capture_ticks(ticks) ? result<void, error_type>::success()
+                                : result<void, error_type>::failure(error::io());
   }
 
   [[nodiscard]] instant now() const noexcept {
-    systimer_->unit_op[0].timer_unit_update = 1U;
-    for (std::uint32_t remaining = 4U; remaining != 0U; --remaining) {
-      if (systimer_->unit_op[0].timer_unit_value_valid != 0U) {
-        break;
+    std::uint64_t ticks{};
+    if (capture_ticks(ticks)) {
+      // Returning the last observation on a stale/invalid snapshot keeps the
+      // infallible portable clock contract monotonic. Users that need to
+      // distinguish stale hardware use try_now().
+      if (ticks >= last_ticks_) {
+        last_ticks_ = ticks;
       }
     }
-    std::uint32_t high = systimer_->unit_val[0].hi.timer_unit_value_hi;
-    std::uint32_t low = systimer_->unit_val[0].lo.timer_unit_value_lo;
-    std::uint32_t high_again =
-        systimer_->unit_val[0].hi.timer_unit_value_hi;
-    if (high != high_again) {
-      high = high_again;
-      low = systimer_->unit_val[0].lo.timer_unit_value_lo;
+    return ticks_to_instant(last_ticks_);
+  }
+
+  [[nodiscard]] result<instant, error_type> try_now() const noexcept {
+    std::uint64_t ticks{};
+    if (!capture_ticks(ticks)) {
+      return result<instant, error_type>::failure(error::io());
     }
-    const std::uint64_t ticks = (std::uint64_t{high} << 32U) | low;
+    if (ticks >= last_ticks_) {
+      last_ticks_ = ticks;
+    }
+    return result<instant, error_type>::success(ticks_to_instant(last_ticks_));
+  }
+
+  [[nodiscard]] bool observation_valid() const noexcept {
+    return observation_valid_;
+  }
+
+  [[nodiscard]] static constexpr instant
+  ticks_to_instant(std::uint64_t ticks) noexcept {
     const std::uint64_t whole_seconds = ticks / ClockHz;
     const std::uint64_t remainder = ticks % ClockHz;
     return instant{whole_seconds * 1'000'000'000ULL +
@@ -69,7 +88,36 @@ class MonotonicClock {
   }
 
  protected:
+  [[nodiscard]] bool capture_ticks(std::uint64_t& ticks) const noexcept {
+    systimer_->unit_op[0].timer_unit_update = 1U;
+    bool valid = false;
+    for (std::uint32_t remaining = poll_limit_; remaining != 0U; --remaining) {
+      if (systimer_->unit_op[0].timer_unit_value_valid != 0U) {
+        valid = true;
+        break;
+      }
+    }
+    if (!valid) {
+      observation_valid_ = false;
+      return false;
+    }
+    std::uint32_t high = systimer_->unit_val[0].hi.timer_unit_value_hi;
+    std::uint32_t low = systimer_->unit_val[0].lo.timer_unit_value_lo;
+    std::uint32_t high_again =
+        systimer_->unit_val[0].hi.timer_unit_value_hi;
+    if (high != high_again) {
+      high = high_again;
+      low = systimer_->unit_val[0].lo.timer_unit_value_lo;
+    }
+    ticks = (std::uint64_t{high} << 32U) | low;
+    observation_valid_ = true;
+    return true;
+  }
+
   systimer_dev_t* systimer_;
+  std::uint32_t poll_limit_;
+  mutable std::uint64_t last_ticks_{};
+  mutable bool observation_valid_{};
 };
 
 template <std::uint32_t ClockHz = 16'000'000U>

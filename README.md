@@ -42,6 +42,22 @@ headers, hidden heap allocation, virtual dispatch, exceptions, RTTI, and
 FreeRTOS dependencies. Core contracts and external-device headers are included
 transitively by the selected target; they are not separate selection targets.
 
+`ECU_DRIVERS_TARGETS` is a CMake list selecting which concrete targets are
+configured and installed. Its default contains all six targets; a constrained
+consumer can select one without requiring another target's vendor dependency,
+for example:
+
+```sh
+cmake -S . -B build-h7 \
+  -DECU_DRIVERS_TARGETS=stm32h723vgt6 \
+  -DECU_DRIVERS_BUILD_TESTS=ON
+```
+
+Installed headers use isolated roots for core, external devices, each target
+family, and each exact profile. The `installed_package` CTest group installs to
+a temporary prefix and independently configures a consumer for every selected
+target, exercising the exported dependency graph and public include paths.
+
 The ECU firmware template consumes this repository as one dependency and
 keeps board wiring, startup policy, FreeRTOS integration, and application code
 above it.

@@ -1,4 +1,4 @@
-# hal-target-stm32h7
+# STM32H7 platform
 
 MCU-family target package for direct-register STM32H7 implementations of the
 `ecu-drivers` contracts.
@@ -38,10 +38,13 @@ apply the required cache policy.
 
 The ADC engine accepts register instances and BSP-owned DMA storage. It performs regulator startup,
 ADC1/2 linearity calibration, external-trigger and oversampling configuration, DMAMUX/DMA setup,
-half/complete interrupt publication, and bounded stop/error handling. Its concrete channel provides
+bounded half/complete interrupt capture, task-context publication, and bounded stop/error handling.
+The IRQ only records which completed half is pending; `try_read()`/`read_raw()` services that work and
+reports a stream overrun if DMA overwrites a half while it is being copied. Its concrete channel provides
 the current `hal::adc::Channel` (`read_raw()`/`read_voltage()`) contract, and the continuous publisher
 provides `hal::adc::ContinuousChannel::try_read()` over `raw_sample` values. The BSP must make DMA
-storage coherent, normally with a non-cacheable MPU region.
+storage coherent, normally with a non-cacheable MPU region. Each sample in a published half carries
+the block-completion timestamp; it is not represented as a per-conversion timestamp.
 
 DMA-capable synchronous core contracts use DMA for the data plane and a bounded completion check before
 returning. A genuinely interrupt-only completion path would require an asynchronous operation contract

@@ -42,6 +42,9 @@ concept Clock =
 
 template <class T>
 concept Alarm = Clock<T> && requires(T& clock, utc_time value) {
+  // set_alarm() represents a single absolute UTC deadline, not a recurring
+  // day-of-month alarm. Targets with calendar-only match hardware must filter
+  // recurring hardware matches and clear_alarm() must disarm the deadline.
   {
     clock.set_alarm(value)
   } -> std::same_as<result<void, typename T::error_type>>;

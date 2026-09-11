@@ -20,26 +20,7 @@ struct capabilities {
   static constexpr bool lpuart{true};
   static constexpr bool ethernet_mac{false};
   static constexpr std::uint8_t sdmmc_instances{0U};
-  static constexpr std::uint8_t dma_controllers{2U};
-  static constexpr std::uint8_t dma_channels{16U};
-  static constexpr bool data_cache{false};
   static constexpr bool hrtim{true};
 };
 
-// The G4 FDCAN instances use fixed, separate message-RAM windows. The
-// controller driver still accepts the window pointer explicitly so the BSP
-// remains responsible for choosing the instance and mapping policy.
-namespace fdcan_message_ram {
-inline constexpr std::uintptr_t base{0x4000A400U};
-inline constexpr std::size_t words{212U};
-inline constexpr std::size_t instance_stride_words{words};
-
-[[nodiscard]] constexpr std::uintptr_t base_for(unsigned instance) noexcept {
-  return instance >= 1U && instance <= 3U
-             ? base + (static_cast<std::uintptr_t>(instance - 1U) *
-                       instance_stride_words * sizeof(std::uint32_t))
-             : 0U;
-}
-} // namespace fdcan_message_ram
-
-} // namespace hal::stm32g4::device::stm32g484ce
+}  // namespace hal::stm32g4::device::stm32g484ce

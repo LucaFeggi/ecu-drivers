@@ -4,11 +4,13 @@
 
 namespace hal::stm32h7::device::stm32h723vgt6 {
 
+// Only interrupt numbers consumed by reusable drivers are published here.
+// Vector installation and priority remain BSP policy.
 namespace interrupt_number {
 inline constexpr std::int32_t dma1_stream0{11};
 inline constexpr std::int32_t adc1_adc2{18};
 inline constexpr std::int32_t tim2{28};
 inline constexpr std::int32_t tim6_dac{54};
-} // namespace interrupt_number
+}  // namespace interrupt_number
 
-} // namespace hal::stm32h7::device::stm32h723vgt6
+}  // namespace hal::stm32h7::device::stm32h723vgt6

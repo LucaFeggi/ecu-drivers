@@ -1,4 +1,4 @@
-# hal-target-esp32s3
+# ESP32-S3 platform
 
 Strict, direct-register implementations of the `ecu-drivers` contracts for
 the selected ESP32-S3 package profile.
@@ -26,6 +26,19 @@ All DMA buffers and descriptors are caller-owned. The BSP must place them in
 DMA-visible internal memory, and must define the cache/PSRAM policy before
 using a zero-copy extension. The provided high-throughput paths stage ordinary
 application buffers into static internal scratch storage.
+
+Raw internal-flash program/erase operations require a BSP-supplied operation
+guard. The guard must coordinate both cores, suspend cache-dependent work and
+interrupts, execute from IRAM, and reject program sources outside internal
+DRAM. The default guard denies every mutation; this mandatory constructor
+dependency is an intentional safety-breaking API change from the formerly
+unguarded flash object. Reads remain memory-mapped.
+
+TWAI bit timing is derived from the controller's compile-time source frequency,
+not an assumed 80 MHz clock. `initiate_bus_off_recovery()` implements the
+ESP32-S3 sequence of leaving the reset mode entered by bus-off; `bus_off()` is
+the polling completion observation. A live CAN bus and transceiver are still
+required to validate the 128 bus-free recovery interval electrically.
 
 Ethernet and CAN-FD are explicit unsupported native capabilities: the ESP32-S3
 has no integrated Ethernet MAC and its TWAI block is classic CAN. External

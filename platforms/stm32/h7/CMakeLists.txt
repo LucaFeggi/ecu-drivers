@@ -1,24 +1,28 @@
-add_library(hal-target-stm32h7 INTERFACE)
-target_compile_features(hal-target-stm32h7 INTERFACE cxx_std_20)
-target_include_directories(hal-target-stm32h7 INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../mcu/stm32h723vgt6/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-
 add_library(hal-target-stm32h723vgt6 INTERFACE)
 add_library(hal::stm32h723vgt6 ALIAS hal-target-stm32h723vgt6)
 set_target_properties(hal-target-stm32h723vgt6
                       PROPERTIES EXPORT_NAME stm32h723vgt6)
+target_link_libraries(hal-target-stm32h723vgt6 INTERFACE hal::devices)
 target_include_directories(hal-target-stm32h723vgt6 INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../mcu/stm32h723vgt6/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/targets/stm32h7>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/profiles/stm32h723vgt6>)
 target_compile_definitions(hal-target-stm32h723vgt6 INTERFACE STM32H723xx=1)
 target_include_directories(hal-target-stm32h723vgt6 SYSTEM INTERFACE
     $<BUILD_INTERFACE:${ECU_DRIVERS_THIRD_PARTY}/cmsis-device-h7/Include>
-    $<BUILD_INTERFACE:${ECU_DRIVERS_THIRD_PARTY}/cmsis-core/CMSIS/Core/Include>)
+    $<BUILD_INTERFACE:${ECU_DRIVERS_THIRD_PARTY}/cmsis-core/CMSIS/Core/Include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-device-h7>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-core>)
+
+install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/targets/stm32h7)
+install(DIRECTORY ../../../mcu/stm32h723vgt6/include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/profiles/stm32h723vgt6)
+install(DIRECTORY ${ECU_DRIVERS_THIRD_PARTY}/cmsis-device-h7/Include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-device-h7)
+install(DIRECTORY ${ECU_DRIVERS_THIRD_PARTY}/cmsis-core/CMSIS/Core/Include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-core)
 
 if(ECU_DRIVERS_BUILD_TESTS AND BUILD_TESTING)
     add_executable(hal_stm32h7_device_profile_tests tests/device_profile.cpp)
@@ -32,7 +36,7 @@ if(ECU_DRIVERS_BUILD_TESTS AND BUILD_TESTING)
     add_test(NAME hal_stm32h7_device_profile
              COMMAND hal_stm32h7_device_profile_tests)
     set_tests_properties(hal_stm32h7_device_profile
-                         PROPERTIES LABELS "compile;register_model")
+                         PROPERTIES LABELS "compile_validated;register_model_validated")
 
     # The exact template-instantiation test touches CMSIS cache helpers that
     # intentionally use 32-bit pointer casts. Build it with the target

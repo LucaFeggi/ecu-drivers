@@ -1,4 +1,4 @@
-# STM32G4 target
+# STM32G4 platform
 
 This package contains the direct-register STM32G4 implementation. Exact
 device and package facts are supplied separately by the selected chip profile.

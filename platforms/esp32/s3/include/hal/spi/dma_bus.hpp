@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/dma.hpp>
+#include <hal/dma/descriptor.hpp>
 #include <hal/dma/channel.hpp>
 #include <hal/foundation/result.hpp>
 #include <hal/foundation/span.hpp>
@@ -44,8 +44,8 @@ class DmaBus8 {
   static constexpr bool supports_lsb_first{true};
 
   DmaBus8(spi_dev_t& spi, gdma_dev_t& gdma,
-          span<device::gdma_descriptor> tx_descriptors,
-          span<device::gdma_descriptor> rx_descriptors,
+          span<hal::esp32s3::dma::descriptor> tx_descriptors,
+          span<hal::esp32s3::dma::descriptor> rx_descriptors,
           span<std::byte> tx_scratch, span<std::byte> rx_scratch,
           std::uint32_t poll_limit = 1'000'000U) noexcept
       : spi_{&spi}, dma_{gdma}, tx_descriptors_{tx_descriptors},
@@ -274,8 +274,8 @@ class DmaBus8 {
 
   spi_dev_t* spi_;
   dma::Channel<DmaChannel> dma_;
-  span<device::gdma_descriptor> tx_descriptors_;
-  span<device::gdma_descriptor> rx_descriptors_;
+  span<hal::esp32s3::dma::descriptor> tx_descriptors_;
+  span<hal::esp32s3::dma::descriptor> rx_descriptors_;
   span<std::byte> tx_scratch_;
   span<std::byte> rx_scratch_;
   std::uint32_t poll_limit_;

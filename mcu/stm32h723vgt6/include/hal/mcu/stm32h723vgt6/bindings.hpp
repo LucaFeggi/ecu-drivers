@@ -27,4 +27,4 @@ using rtc_registers = RTC_TypeDef;
 using watchdog_registers = IWDG_TypeDef;
 using ethernet_registers = ETH_TypeDef;
 
-} // namespace hal::stm32h7::device::stm32h723vgt6::binding
+}  // namespace hal::stm32h7::device::stm32h723vgt6::binding

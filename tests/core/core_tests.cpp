@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <hal/contracts/can.hpp>
 #include <hal/foundation/crc32.hpp>
+#include <hal/foundation/deadline.hpp>
+#include <hal/foundation/dma.hpp>
 #include <hal/foundation/result.hpp>
 #include <hal/foundation/span.hpp>
 #include <hal/contracts/i2c.hpp>
@@ -10,6 +12,9 @@
 #include <utility>
 
 namespace {
+
+static_assert(hal::DmaCoherencyPolicy<hal::coherent_dma_policy>);
+static_assert(alignof(hal::dma_storage<std::byte, 64U, 32U>) == 32U);
 
 enum class TestError : std::uint8_t { failed };
 
@@ -99,6 +104,20 @@ void test_crc32() {
   check(hal::crc32(bytes) == 0xCBF43926U);
 }
 
+void test_deadline() {
+  constexpr auto timeout =
+      hal::deadline::after(hal::instant{100U}, hal::nanoseconds{25U});
+  static_assert(timeout.expires_at().nanoseconds_since_boot == 125U);
+  check(!timeout.expired(hal::instant{124U}));
+  check(timeout.expired(hal::instant{125U}));
+  check(timeout.remaining(hal::instant{110U}).value == 15U);
+  check(timeout.remaining(hal::instant{130U}).value == 0U);
+
+  constexpr auto saturated = hal::deadline::after(
+      hal::instant{UINT64_MAX - 1U}, hal::nanoseconds{10U});
+  static_assert(saturated.expires_at().nanoseconds_since_boot == UINT64_MAX);
+}
+
 }  // namespace
 
 int main() {
@@ -106,5 +125,6 @@ int main() {
   test_can_values();
   test_transaction_descriptors();
   test_crc32();
+  test_deadline();
   return failures;
 }

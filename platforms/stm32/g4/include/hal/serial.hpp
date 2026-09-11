@@ -218,8 +218,10 @@ template <class Registers, class TxChannel, class RxChannel,
           std::size_t RxCapacity = 2048U>
 class DmaPort {
   static_assert(TxCapacity > 0U && TxCapacity <= 65'535U);
-  static_assert(RxCapacity > 1U && RxCapacity <= 65'535U);
+  static_assert(RxCapacity > 1U && RxCapacity <= 65'535U &&
+                (RxCapacity % 2U) == 0U);
   static_assert(std::atomic_bool::is_always_lock_free);
+  static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
   static_assert(std::atomic<hal::serial::error_kind>::is_always_lock_free);
 
 public:
@@ -255,8 +257,7 @@ public:
     barrier();
     registers_.CR3 = registers_.CR3 | cr3_dmar;
     rx_read_total_ = 0U;
-    rx_produced_total_ = 0U;
-    rx_position_ = 0U;
+    rx_produced_total_.store(0U, std::memory_order_release);
     tx_busy_.store(false, std::memory_order_relaxed);
     fault_.store(hal::serial::error_kind::other, std::memory_order_relaxed);
     configured_ = true;
@@ -300,15 +301,16 @@ public:
     if (fault != hal::serial::error_kind::other) {
       return failure_size(fault);
     }
-    update_rx_position();
-    const std::uint32_t oldest =
-        rx_produced_total_ > RxCapacity ? rx_produced_total_ - RxCapacity : 0U;
-    if (rx_read_total_ < oldest) {
-      rx_read_total_ = oldest;
+    const std::uint32_t produced =
+        rx_produced_total_.load(std::memory_order_acquire);
+    const std::uint32_t pending = produced - rx_read_total_;
+    if (pending > RxCapacity) {
+      rx_read_total_ = produced - static_cast<std::uint32_t>(RxCapacity);
+      return failure_size(hal::serial::error_kind::overrun);
     }
     const std::size_t count =
-        static_cast<std::size_t>(rx_produced_total_ - rx_read_total_) < data.size()
-            ? static_cast<std::size_t>(rx_produced_total_ - rx_read_total_)
+        static_cast<std::size_t>(pending) < data.size()
+            ? static_cast<std::size_t>(pending)
             : data.size();
     for (std::size_t i = 0U; i < count; ++i) {
       data[i] = rx_ring_[(rx_read_total_ + i) % RxCapacity];
@@ -348,7 +350,8 @@ public:
     if (receive_error != hal::serial::error_kind::other) {
       fault_.store(receive_error, std::memory_order_release);
     }
-    update_rx_position();
+    rx_produced_total_.fetch_add(static_cast<std::uint32_t>(RxCapacity / 2U),
+                                 std::memory_order_release);
   }
 
 private:
@@ -422,17 +425,6 @@ private:
     tx_.CCR = tx_.CCR | dma_enable;
   }
 
-  void update_rx_position() noexcept {
-    barrier();
-    const std::uint32_t position =
-        (RxCapacity - rx_.CNDTR) % static_cast<std::uint32_t>(RxCapacity);
-    const std::uint32_t delta =
-        (position + static_cast<std::uint32_t>(RxCapacity) - rx_position_) %
-        static_cast<std::uint32_t>(RxCapacity);
-    rx_produced_total_ += delta;
-    rx_position_ = position;
-  }
-
   [[nodiscard]] auto failure(hal::serial::error_kind kind)
       -> result<void, error_type> {
     return result<void, error_type>::failure(error{kind});
@@ -454,9 +446,8 @@ private:
   std::array<std::byte, TxCapacity> &tx_buffer_;
   std::array<std::byte, RxCapacity> &rx_ring_;
   poll_budget timeout_{};
-  std::uint32_t rx_position_{};
   std::uint32_t rx_read_total_{};
-  std::uint32_t rx_produced_total_{};
+  std::atomic<std::uint32_t> rx_produced_total_{};
   std::atomic_bool tx_busy_{};
   std::atomic<hal::serial::error_kind> fault_{hal::serial::error_kind::other};
   bool configured_{};

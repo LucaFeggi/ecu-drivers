@@ -178,7 +178,7 @@ class Continuous {
   using error_type = error;
 
   Continuous(apb_saradc_dev_t& adc, sens_dev_t& sens, gdma_dev_t& gdma,
-             Clock& clock, span<device::gdma_descriptor> descriptors,
+             Clock& clock, span<hal::esp32s3::dma::descriptor> descriptors,
              span<std::uint32_t> dma_samples) noexcept
       : adc_{&adc}, sens_{&sens}, dma_{gdma}, clock_{clock},
         descriptors_{descriptors}, dma_samples_{dma_samples} {}
@@ -356,7 +356,7 @@ class Continuous {
         const std::uint32_t word = dma_samples_[base + sample];
         stream_.publish(word & 0x0FFFU, timestamp);
       }
-      descriptors_[index].control = device::descriptor_control(
+      descriptors_[index].control = hal::esp32s3::dma::descriptor_control(
           records_per_descriptor_ * sizeof(std::uint32_t), 0U, true, false);
       index = (index + 1U) % descriptors_.size();
       if (index == (eof_index + 1U) % descriptors_.size()) {
@@ -389,7 +389,7 @@ class Continuous {
   sens_dev_t* sens_;
   dma::Channel<DmaChannel> dma_;
   Clock& clock_;
-  span<device::gdma_descriptor> descriptors_;
+  span<hal::esp32s3::dma::descriptor> descriptors_;
   span<std::uint32_t> dma_samples_;
   continuous_config configuration_{};
   Stream<Characteristics, QueueCapacity> stream_{};

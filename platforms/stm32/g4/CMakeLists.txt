@@ -1,24 +1,28 @@
-add_library(hal-target-stm32g4 INTERFACE)
-target_compile_features(hal-target-stm32g4 INTERFACE cxx_std_20)
-target_include_directories(hal-target-stm32g4 INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../mcu/stm32g484ce/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
-
 add_library(hal-target-stm32g484ce INTERFACE)
 add_library(hal::stm32g484ce ALIAS hal-target-stm32g484ce)
 set_target_properties(hal-target-stm32g484ce
                       PROPERTIES EXPORT_NAME stm32g484ce)
+target_link_libraries(hal-target-stm32g484ce INTERFACE hal::devices)
 target_include_directories(hal-target-stm32g484ce INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../../mcu/stm32g484ce/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/targets/stm32g4>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/profiles/stm32g484ce>)
 target_compile_definitions(hal-target-stm32g484ce INTERFACE STM32G484xx=1)
 target_include_directories(hal-target-stm32g484ce SYSTEM INTERFACE
     $<BUILD_INTERFACE:${ECU_DRIVERS_THIRD_PARTY}/cmsis-device-g4/Include>
-    $<BUILD_INTERFACE:${ECU_DRIVERS_THIRD_PARTY}/cmsis-core/CMSIS/Core/Include>)
+    $<BUILD_INTERFACE:${ECU_DRIVERS_THIRD_PARTY}/cmsis-core/CMSIS/Core/Include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-device-g4>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-core>)
+
+install(DIRECTORY include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/targets/stm32g4)
+install(DIRECTORY ../../../mcu/stm32g484ce/include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/profiles/stm32g484ce)
+install(DIRECTORY ${ECU_DRIVERS_THIRD_PARTY}/cmsis-device-g4/Include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-device-g4)
+install(DIRECTORY ${ECU_DRIVERS_THIRD_PARTY}/cmsis-core/CMSIS/Core/Include/
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ecu-drivers/third_party/cmsis-core)
 
 if(ECU_DRIVERS_BUILD_TESTS AND BUILD_TESTING)
     add_executable(hal_stm32g4_device_profile_tests tests/device_profile.cpp)
@@ -28,7 +32,7 @@ if(ECU_DRIVERS_BUILD_TESTS AND BUILD_TESTING)
     add_test(NAME hal_stm32g4_device_profile
              COMMAND hal_stm32g4_device_profile_tests)
     set_tests_properties(hal_stm32g4_device_profile
-                         PROPERTIES LABELS "compile;register_model")
+                         PROPERTIES LABELS "compile_validated;register_model_validated")
 
     if(CMAKE_CROSSCOMPILING)
         add_library(hal_stm32g4_device_profile_exact_tests OBJECT

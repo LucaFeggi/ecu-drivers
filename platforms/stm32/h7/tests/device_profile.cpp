@@ -319,6 +319,8 @@ struct pwm_registers {
   volatile std::uint32_t PSC{};
   volatile std::uint32_t ARR{};
   volatile std::uint32_t EGR{};
+  volatile std::uint32_t CCMR1{};
+  volatile std::uint32_t CCMR2{};
   volatile std::uint32_t CCER{};
   volatile std::uint32_t CCR1{};
   volatile std::uint32_t CCR2{};
@@ -445,8 +447,8 @@ static_assert(profile::data_cache_line_bytes == 32U);
 static_assert(profile::adc1_pin::inp4_channel == 4U);
 static_assert(profile::dmamux1_request::adc1 == 9U);
 static_assert(profile::interrupt_number::dma1_stream0 == 11);
-static_assert(profile::sram1.dma1_accessible);
-static_assert(!profile::dtcm.dma1_accessible);
+static_assert(profile::sram1.dma_accessible);
+static_assert(!profile::dtcm.dma_accessible);
 static_assert(adc_dma_configuration.valid());
 static_assert(adc_dma_configuration.analog_clock_hz() == 16'000'000U);
 static_assert(hal::adc::ContinuousChannel<adc_channel>);
@@ -585,6 +587,64 @@ int main() {
       timeout_configuration.error().kind() !=
           hal::serial::error_kind::timeout) {
     return 13;
+  }
+
+  pwm_registers timer{};
+  hal::stm32h7::pwm::timer_period_state shared_period{};
+  pwm_output first_pwm{timer, shared_period};
+  complementary_pwm_output second_pwm{timer, shared_period};
+  constexpr hal::pwm::config one_millisecond{
+      hal::nanoseconds{1'000'000U}, 1'000U,
+      hal::pwm::polarity::active_high};
+  if (!first_pwm.configure(one_millisecond) ||
+      !second_pwm.configure(one_millisecond) ||
+      (timer.CCMR1 & ((0x7U << 4U) | (1U << 3U))) !=
+          ((6U << 4U) | (1U << 3U)) ||
+      (timer.CCMR1 & ((0x7U << 12U) | (1U << 11U))) !=
+          ((6U << 12U) | (1U << 11U))) {
+    return 14;
+  }
+  const auto conflict = second_pwm.configure(
+      {hal::nanoseconds{2'000'000U}, 1'000U,
+       hal::pwm::polarity::active_high});
+  if (conflict || conflict.error().kind() !=
+                      hal::pwm::error_kind::shared_period_conflict) {
+    return 15;
+  }
+
+  i2c_registers reload_registers{};
+  reload_registers.ISR =
+      (1U << 1U) | (1U << 5U) | (1U << 6U) | (1U << 7U);
+  i2c_controller reload_i2c{
+      reload_registers,
+      {1U, hal::stm32h7::poll_budget{1'000U}, 0U, false}};
+  std::array<std::byte, 300U> long_payload{};
+  const auto reload_initialized = reload_i2c.initialize();
+  const auto long_write = hal::i2c::write(
+      reload_i2c, hal::i2c::address7{0x20U}, long_payload);
+  constexpr std::uint32_t start_bit = 1U << 13U;
+  constexpr std::uint32_t reload_bit = 1U << 24U;
+  constexpr std::uint32_t autoend_bit = 1U << 25U;
+  if (!reload_initialized || !long_write ||
+      (reload_registers.CR2 & start_bit) != 0U ||
+      (reload_registers.CR2 & reload_bit) != 0U ||
+      (reload_registers.CR2 & autoend_bit) == 0U ||
+      ((reload_registers.CR2 >> 16U) & 0xFFU) != 45U) {
+    return 16;
+  }
+
+  i2c_registers nack_registers{};
+  nack_registers.ISR = 1U << 4U;
+  i2c_controller nack_i2c{
+      nack_registers, {1U, hal::stm32h7::poll_budget{10U}, 0U, false}};
+  const auto nack_initialized = nack_i2c.initialize();
+  const auto nack = hal::i2c::write(
+      nack_i2c, hal::i2c::address7{0x20U},
+      hal::span<const std::byte>{long_payload.data(), 1U});
+  if (!nack_initialized || nack ||
+      nack.error().kind() != hal::i2c::error_kind::no_acknowledge ||
+      (nack_registers.CR2 & (1U << 14U)) == 0U) {
+    return 17;
   }
   return 0;
 }

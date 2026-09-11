@@ -23,7 +23,7 @@ class DmaPort {
 
   DmaPort(uart_dev_t& uart, uhci_dev_t& uhci, gdma_dev_t& gdma,
           std::uint8_t uart_number,
-          span<device::gdma_descriptor> descriptors,
+          span<hal::esp32s3::dma::descriptor> descriptors,
           span<std::byte> tx_scratch,
           std::uint32_t poll_limit = 1'000'000U) noexcept
       : polling_{uart, poll_limit}, uhci_{&uhci}, uart_number_{uart_number},
@@ -127,7 +127,7 @@ class DmaPort {
   uhci_dev_t* uhci_;
   std::uint8_t uart_number_;
   dma::Channel<DmaChannel> dma_;
-  span<device::gdma_descriptor> descriptors_;
+  span<hal::esp32s3::dma::descriptor> descriptors_;
   span<std::byte> tx_scratch_;
   std::uint32_t poll_limit_;
   bool configured_{};

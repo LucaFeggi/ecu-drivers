@@ -15,33 +15,34 @@
 #include <hal/support.hpp>
 #include <hal/time.hpp>
 #include <hal/watchdog.hpp>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/capabilities.hpp>
+#include <hal/mcu/esp32s3_wroom_1_n16r8/device.hpp>
 #include <hal/mcu/esp32s3_wroom_1_n16r8/bindings.hpp>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/clock.hpp>
+#include <hal/clock.hpp>
 #include <hal/mcu/esp32s3_wroom_1_n16r8/device.hpp>
 #include <hal/mcu/esp32s3_wroom_1_n16r8/dma.hpp>
 #include <hal/mcu/esp32s3_wroom_1_n16r8/interrupts.hpp>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/memory.hpp>
+#include <hal/memory.hpp>
 #include <hal/mcu/esp32s3_wroom_1_n16r8/pins.hpp>
 
 namespace profile = hal::esp32s3_wroom_1_n16r8;
 
-static_assert(std::string_view{profile::device::name} ==
-              "esp32s3_wroom_1_n16r8");
-static_assert(profile::device::flash_bytes == 16U * 1024U * 1024U);
-static_assert(profile::device::psram_bytes == 8U * 1024U * 1024U);
-static_assert(profile::device::gpio_count == 49U);
+static_assert(profile::device::name == "ESP32-S3-WROOM-1-N16R8");
+static_assert(profile::device::capabilities::flash_bytes ==
+              16U * 1024U * 1024U);
+static_assert(profile::device::capabilities::psram_bytes ==
+              8U * 1024U * 1024U);
+static_assert(profile::device::capabilities::gpio_count == 49U);
 static_assert(!profile::device::is_valid_gpio(35U));
 static_assert(!profile::device::is_output_capable(46U));
-static_assert(profile::device::spi_dma.status ==
+static_assert(profile::device::capabilities::spi_dma.status ==
               profile::implementation_status::available);
-static_assert(profile::device::uart_dma.status ==
+static_assert(profile::device::capabilities::uart_dma.status ==
               profile::implementation_status::available);
-static_assert(profile::device::adc_dma.status ==
+static_assert(profile::device::capabilities::adc_dma.status ==
               profile::implementation_status::available);
-static_assert(profile::device::sdmmc_dma.status ==
+static_assert(profile::device::capabilities::sdmmc_dma.status ==
               profile::implementation_status::available);
-static_assert(profile::device::native_ethernet.status ==
+static_assert(profile::device::capabilities::native_ethernet.status ==
               profile::implementation_status::unsupported);
 
 static_assert(sizeof(profile::device::gdma_descriptor) == 12U);
@@ -64,6 +65,7 @@ using serial_dma_port = profile::serial::DmaPort<>;
 using spi_bus = profile::spi::DmaBus8<>;
 using i2c_controller = profile::i2c::Controller<>;
 using can_controller = profile::can::Controller<>;
+static_assert(profile::can::find_timing({}, 40'000'000U).bitrate != 0U);
 using pwm_output = profile::pwm::Output<0U, 0U>;
 using rtc_clock = profile::rtc::Clock<>;
 using monotonic_clock = profile::time::MonotonicClock<>;
@@ -131,7 +133,7 @@ static_assert(hal::nv::NorFlash<flash>);
   std::array<profile::device::gdma_descriptor, 2U> descriptors{};
   std::array<std::byte, 128U> scratch{};
   std::array<std::byte, 128U> receive{};
-  profile::device::dma_array<std::uint32_t, 32U> adc_samples{};
+  profile::memory::dma_array<std::uint32_t, 32U> adc_samples{};
   std::array<sdmmc_desc_t, 2U> sdmmc_descriptors{};
   profile::spi::DmaBus8<> bus{
       spi, gdma, {descriptors.data(), 1U}, {descriptors.data() + 1U, 1U},
@@ -172,6 +174,7 @@ static_assert(hal::nv::NorFlash<flash>);
   (void)can.configure({});
   (void)can.set_filters({});
   (void)can.bus_off();
+  (void)can.initiate_bus_off_recovery();
 
   profile::pwm::Output<0U, 0U> pwm{ledc};
   (void)pwm.configure({hal::nanoseconds{1'000'000U}, 1'000U});
@@ -194,7 +197,8 @@ static_assert(hal::nv::NorFlash<flash>);
   (void)feeder.feed();
   (void)feeder.stop();
 
-  profile::nv::Flash<> nonvolatile{flash_registers};
+  profile::nv::operation_guard_required flash_guard{};
+  profile::nv::Flash<> nonvolatile{flash_registers, flash_guard};
   std::array<std::byte, 4U> nv_input{};
   std::array<std::byte, 4U> nv_output{};
   (void)nonvolatile.read(0U, nv_output);
@@ -213,4 +217,22 @@ static_assert(hal::nv::NorFlash<flash>);
   (void)block.sync();
 }
 
-int main() { return 0; }
+int main() {
+  twai_dev_t twai{};
+  profile::can::Controller<> can{twai};
+  const auto premature_recovery = can.initiate_bus_off_recovery();
+  if (premature_recovery ||
+      premature_recovery.error().kind() !=
+          hal::can::error_kind::configuration) {
+    return 1;
+  }
+  if (!can.configure({})) {
+    return 2;
+  }
+  twai.status_reg.val = 1U << 7U;
+  twai.mode_reg.rm = 1U;
+  if (!can.initiate_bus_off_recovery() || twai.mode_reg.rm != 0U) {
+    return 3;
+  }
+  return 0;
+}

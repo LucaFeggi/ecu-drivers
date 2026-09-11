@@ -108,20 +108,27 @@ private:
     if (!configured_ || !tx.valid() || !rx.valid())
       return failure<void>(hal::spi::error_kind::configuration);
     const auto count = tx.size() > rx.size() ? tx.size() : rx.size();
+    registers_.CR1 |= 1U << 6U;
     auto &dr = *reinterpret_cast<volatile std::uint8_t *>(&registers_.DR);
     for (std::size_t i = 0U; i < count; ++i) {
-      if (!wait(1U << 1U))
+      if (!wait(1U << 1U)) {
+        registers_.CR1 &= ~(1U << 6U);
         return failure<void>(hal::spi::error_kind::timeout);
+      }
       dr = i < tx.size() ? std::to_integer<std::uint8_t>(tx[i])
                          : std::to_integer<std::uint8_t>(fill);
-      if (!wait(1U))
+      if (!wait(1U)) {
+        registers_.CR1 &= ~(1U << 6U);
         return failure<void>(hal::spi::error_kind::timeout);
+      }
       const auto received = static_cast<std::byte>(dr);
       if (i < rx.size())
         rx[i] = received;
     }
-    if (!wait(1U << 1U))
+    if (!wait(1U << 1U)) {
+      registers_.CR1 &= ~(1U << 6U);
       return failure<void>(hal::spi::error_kind::timeout);
+    }
     registers_.CR1 &= ~(1U << 6U);
     return result<void, error_type>::success();
   }
@@ -228,11 +235,17 @@ private:
     setup(rx_, rx_channel_, &registers_.DR, rx_storage_.data(), count, false,
           false, true);
     registers_.CR2 |= (1U << 1U) | (1U << 0U);
+    registers_.CR1 |= 1U << 6U;
     for (std::uint32_t n = timeout_.iterations; n > 0U; --n)
       if (tx_.NDTR == 0U && rx_.NDTR == 0U)
         break;
-    if (tx_.NDTR != 0U || rx_.NDTR != 0U)
+    if (tx_.NDTR != 0U || rx_.NDTR != 0U) {
+      tx_.CR &= ~1U;
+      rx_.CR &= ~1U;
+      registers_.CR2 &= ~((1U << 1U) | (1U << 0U));
+      registers_.CR1 &= ~(1U << 6U);
       return failure<void>(hal::spi::error_kind::timeout);
+    }
     tx_.CR &= ~1U;
     rx_.CR &= ~1U;
     registers_.CR2 &= ~((1U << 1U) | (1U << 0U));

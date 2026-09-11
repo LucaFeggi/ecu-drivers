@@ -11,7 +11,7 @@
 #include <hal/rtc.hpp>
 #include <hal/serial.hpp>
 #include <hal/contracts/spi_bus.hpp>
-#include <hal/mcu/stm32g484ce/capabilities.hpp>
+#include <hal/mcu/stm32g484ce/device.hpp>
 #include <hal/mcu/stm32g484ce/dma.hpp>
 #include <hal/mcu/stm32g484ce/device.hpp>
 #include <hal/mcu/stm32g484ce/interrupts.hpp>
@@ -194,7 +194,7 @@ static_assert(hal::watchdog::Feeder<watchdog_feeder>);
 
 static_assert(profile::capabilities::adc_instances == 5U);
 static_assert(profile::capabilities::fdcan_instances == 3U);
-static_assert(profile::capabilities::dma_channels == 16U);
+static_assert(profile::dma_channel_count == 16U);
 static_assert(!profile::capabilities::ethernet_mac);
 static_assert(profile::data_cache_line_bytes == 0U);
 static_assert(profile::flash.size == 512U * 1024U);

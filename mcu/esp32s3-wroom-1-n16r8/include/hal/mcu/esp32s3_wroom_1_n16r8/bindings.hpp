@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <soc/apb_saradc_struct.h>
 #include <soc/gdma_struct.h>
 #include <soc/gpio_struct.h>
@@ -11,14 +10,16 @@
 #include <soc/sdmmc_struct.h>
 #include <soc/sens_struct.h>
 #include <soc/soc.h>
-#include <soc/system_struct.h>
 #include <soc/spi_mem_struct.h>
 #include <soc/spi_struct.h>
+#include <soc/system_struct.h>
 #include <soc/systimer_struct.h>
-#include <soc/twai_struct.h>
 #include <soc/timer_group_struct.h>
+#include <soc/twai_struct.h>
 #include <soc/uart_struct.h>
 #include <soc/uhci_struct.h>
+
+#include <cstdint>
 
 namespace hal::esp32s3_wroom_1_n16r8::device {
 

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/pins.hpp>
+#include <hal/gpio/pin_capabilities.hpp>
 #include <hal/foundation/result.hpp>
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -67,9 +67,11 @@ inline void enable_gpio_input(std::uint8_t pin) noexcept {
 
 [[nodiscard]] inline result<void, error> configure(gpio_dev_t& gpio,
                                                    std::uint8_t pin,
-                                                   pin_config configuration) {
-  if (!device::is_valid_gpio(pin) ||
-      (configuration.output && !device::is_output_capable(pin)) ||
+                                                   pin_config configuration,
+                                                   const hal::esp32s3::gpio::pin_capabilities&
+                                                       pins = hal::esp32s3::gpio::supported_module_pins) {
+  if (!pins.valid(pin) ||
+      (configuration.output && !pins.output_capable(pin)) ||
       (!configuration.input && !configuration.output)) {
     return result<void, error>::failure(error::unavailable());
   }
@@ -99,15 +101,17 @@ class OutputPin {
  public:
   using error_type = error;
 
-  OutputPin(gpio_dev_t& gpio, std::uint8_t pin, bool open_drain = false) noexcept
-      : gpio_{&gpio}, pin_{pin}, open_drain_{open_drain} {}
+  OutputPin(gpio_dev_t& gpio, std::uint8_t pin, bool open_drain = false,
+            const hal::esp32s3::gpio::pin_capabilities& pins =
+                hal::esp32s3::gpio::supported_module_pins) noexcept
+      : gpio_{&gpio}, pins_{&pins}, pin_{pin}, open_drain_{open_drain} {}
 
   [[nodiscard]] result<void, error_type> configure() noexcept {
-    return gpio::configure(*gpio_, pin_, {false, true, open_drain_});
+    return gpio::configure(*gpio_, pin_, {false, true, open_drain_}, *pins_);
   }
 
   [[nodiscard]] result<void, error_type> write(hal::gpio::level value) noexcept {
-    if (!device::is_output_capable(pin_)) {
+    if (!pins_->output_capable(pin_)) {
       return result<void, error_type>::failure(error_type::unavailable());
     }
     const std::uint32_t bit = std::uint32_t{1U} << (pin_ & 31U);
@@ -139,6 +143,7 @@ class OutputPin {
 
  private:
   gpio_dev_t* gpio_;
+  const hal::esp32s3::gpio::pin_capabilities* pins_;
   std::uint8_t pin_;
   bool open_drain_;
 };
@@ -147,15 +152,17 @@ class InputPin {
  public:
   using error_type = error;
 
-  InputPin(gpio_dev_t& gpio, std::uint8_t pin) noexcept
-      : gpio_{&gpio}, pin_{pin} {}
+  InputPin(gpio_dev_t& gpio, std::uint8_t pin,
+           const hal::esp32s3::gpio::pin_capabilities& pins =
+               hal::esp32s3::gpio::supported_module_pins) noexcept
+      : gpio_{&gpio}, pins_{&pins}, pin_{pin} {}
 
   [[nodiscard]] result<void, error_type> configure() noexcept {
-    return gpio::configure(*gpio_, pin_, {true, false, false});
+    return gpio::configure(*gpio_, pin_, {true, false, false}, *pins_);
   }
 
   [[nodiscard]] result<hal::gpio::level, error_type> read() const noexcept {
-    if (!device::is_valid_gpio(pin_)) {
+    if (!pins_->valid(pin_)) {
       return result<hal::gpio::level, error_type>::failure(
           error_type::unavailable());
     }
@@ -167,6 +174,7 @@ class InputPin {
 
  protected:
   gpio_dev_t* gpio_;
+  const hal::esp32s3::gpio::pin_capabilities* pins_;
   std::uint8_t pin_;
 };
 

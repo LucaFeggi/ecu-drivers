@@ -16,6 +16,6 @@ struct pin {
 namespace adc1_pin {
 inline constexpr pin inp4{port::c, 4U};
 inline constexpr std::uint8_t inp4_channel{4U};
-} // namespace adc1_pin
+}  // namespace adc1_pin
 
-} // namespace hal::stm32h7::device::stm32h723vgt6
+}  // namespace hal::stm32h7::device::stm32h723vgt6

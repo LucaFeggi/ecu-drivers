@@ -58,12 +58,12 @@ public:
     if (!timeout_.valid()) {
       return failure_time(hal::rtc::error_kind::clock_failure);
     }
-    if ((registers_.ISR & flag_rsf) == 0U) {
-      registers_.ISR = registers_.ISR & ~flag_rsf;
+    if ((registers_.ICSR & flag_rsf) == 0U) {
+      registers_.ICSR = registers_.ICSR & ~flag_rsf;
       bool synchronized = false;
       for (std::uint32_t remaining = timeout_.iterations; remaining > 0U;
            --remaining) {
-        if ((registers_.ISR & flag_rsf) != 0U) {
+        if ((registers_.ICSR & flag_rsf) != 0U) {
           synchronized = true;
           break;
         }
@@ -112,6 +112,12 @@ public:
       return result<void, error_type>::failure(
           error{hal::rtc::error_kind::out_of_range});
     }
+    const auto current = read();
+    if (!current || !before(current.value(), value)) {
+      return result<void, error_type>::failure(
+          current ? error{hal::rtc::error_kind::out_of_range}
+                  : current.error());
+    }
     return write_calendar(year, month, day, hour, minute, second);
   }
 
@@ -133,35 +139,71 @@ public:
     write_protected(false);
     registers_.CR = registers_.CR & ~control_format_12_hour;
     registers_.CR = registers_.CR & ~control_alarm_enable;
-    registers_.ISR = registers_.ISR & ~flag_alarm;
+    bool writable = false;
+    for (std::uint32_t remaining = timeout_.iterations; remaining > 0U;
+         --remaining) {
+      if ((registers_.ICSR & flag_alarm_write) != 0U) {
+        writable = true;
+        break;
+      }
+    }
+    if (!writable) {
+      write_protected(true);
+      return result<void, error_type>::failure(
+          error{hal::rtc::error_kind::clock_failure});
+    }
+    registers_.SCR = flag_alarm;
     registers_.ALRMAR = binary_to_bcd(second) | (binary_to_bcd(minute) << 8U) |
                         (binary_to_bcd(hour) << 16U) |
                         (binary_to_bcd(day) << 24U);
     registers_.CR =
         registers_.CR | control_alarm_interrupt | control_alarm_enable;
     write_protected(true);
+    alarm_deadline_ = value;
+    alarm_armed_ = true;
     return result<void, error_type>::success();
   }
 
   [[nodiscard]] bool alarm_pending() noexcept {
-    return (registers_.ISR & flag_alarm) != 0U;
+    if (!alarm_armed_ || (registers_.SR & flag_alarm) == 0U) {
+      return false;
+    }
+    const auto current = read();
+    if (!current || before(current.value(), alarm_deadline_)) {
+      clear_alarm_flag();
+      return false;
+    }
+    return true;
   }
 
   void clear_alarm() noexcept {
     write_protected(false);
-    registers_.ISR = registers_.ISR & ~flag_alarm;
+    registers_.CR =
+        registers_.CR & ~(control_alarm_enable | control_alarm_interrupt);
+    clear_alarm_flag();
     write_protected(true);
+    alarm_armed_ = false;
   }
 
 private:
   static constexpr std::uint32_t flag_rsf{1U << 5U};
   static constexpr std::uint32_t flag_initf{1U << 6U};
   static constexpr std::uint32_t flag_init{1U << 7U};
-  static constexpr std::uint32_t flag_alarm{1U << 8U};
+  static constexpr std::uint32_t flag_alarm_write{1U};
+  static constexpr std::uint32_t flag_alarm{1U};
   static constexpr std::uint32_t control_alarm_enable{1U << 8U};
   static constexpr std::uint32_t control_alarm_interrupt{1U << 12U};
   static constexpr std::uint32_t control_format_12_hour{1U << 6U};
   static constexpr std::uint32_t time_pm{1U << 22U};
+
+  [[nodiscard]] static constexpr bool before(hal::utc_time left,
+                                             hal::utc_time right) noexcept {
+    return left.seconds < right.seconds ||
+           (left.seconds == right.seconds &&
+            left.nanoseconds < right.nanoseconds);
+  }
+
+  void clear_alarm_flag() noexcept { registers_.SCR = flag_alarm; }
 
   [[nodiscard]] static constexpr unsigned
   bcd_to_binary(std::uint32_t value) noexcept {
@@ -244,12 +286,12 @@ private:
       -> result<void, error_type> {
     write_protected(false);
     registers_.CR = registers_.CR & ~control_format_12_hour;
-    registers_.ISR = registers_.ISR & ~flag_init;
-    registers_.ISR = registers_.ISR | flag_init;
+    registers_.ICSR = registers_.ICSR & ~flag_init;
+    registers_.ICSR = registers_.ICSR | flag_init;
     bool initialized = false;
     for (std::uint32_t remaining = timeout_.iterations; remaining > 0U;
          --remaining) {
-      if ((registers_.ISR & flag_initf) != 0U) {
+      if ((registers_.ICSR & flag_initf) != 0U) {
         initialized = true;
         break;
       }
@@ -263,7 +305,7 @@ private:
                     (binary_to_bcd(hour) << 16U);
     registers_.DR = binary_to_bcd(day) | (binary_to_bcd(month) << 8U) |
                     (binary_to_bcd(static_cast<unsigned>(year - 2000)) << 16U);
-    registers_.ISR = registers_.ISR & ~flag_init;
+    registers_.ICSR = registers_.ICSR & ~flag_init;
     write_protected(true);
     return result<void, error_type>::success();
   }
@@ -282,6 +324,8 @@ private:
 
   Registers &registers_;
   poll_budget timeout_{};
+  hal::utc_time alarm_deadline_{};
+  bool alarm_armed_{};
 };
 
 } // namespace hal::stm32h5::rtc

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace hal::stm32h5::device::stm32h563vit6 {
@@ -10,9 +11,10 @@ namespace hal::stm32h5::device::stm32h563vit6 {
 struct dma_channel {
   std::uint8_t controller{};
   std::uint8_t channel{};
-  std::int32_t interrupt{-1};
 };
 
-inline constexpr unsigned data_cache_line_bytes{32U};
+inline constexpr std::size_t gpdma_controller_count{2U};
+inline constexpr std::size_t gpdma_channels_per_controller{8U};
+inline constexpr std::size_t gpdma_channel_count{16U};
 
-} // namespace hal::stm32h5::device::stm32h563vit6
+}  // namespace hal::stm32h5::device::stm32h563vit6

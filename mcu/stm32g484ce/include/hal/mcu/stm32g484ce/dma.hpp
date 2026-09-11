@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace hal::stm32g4::device::stm32g484ce {
@@ -7,9 +8,15 @@ namespace hal::stm32g4::device::stm32g484ce {
 struct dma_channel {
   std::uint8_t controller{};
   std::uint8_t channel{};
-  std::int32_t interrupt{};
 };
 
+inline constexpr std::size_t dma_controller_count{2U};
+inline constexpr std::size_t dma_channels_per_controller{8U};
+inline constexpr std::size_t dma_channel_count{16U};
+inline constexpr std::size_t dmamux_channel_count{16U};
+
+// These are immutable peripheral request IDs. The BSP still selects the DMA
+// controller and channel for a concrete board configuration.
 namespace dmamux_request {
 inline constexpr std::uint8_t adc1{5U};
 inline constexpr std::uint8_t adc2{36U};
@@ -46,8 +53,6 @@ inline constexpr std::uint8_t lpuart1_rx{34U};
 inline constexpr std::uint8_t lpuart1_tx{35U};
 inline constexpr std::uint8_t tim6_up{8U};
 inline constexpr std::uint8_t tim7_up{9U};
-} // namespace dmamux_request
+}  // namespace dmamux_request
 
-inline constexpr unsigned dmamux_channel_count{16U};
-
-} // namespace hal::stm32g4::device::stm32g484ce
+}  // namespace hal::stm32g4::device::stm32g484ce

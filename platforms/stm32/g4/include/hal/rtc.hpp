@@ -108,6 +108,11 @@ public:
         !timeout_.valid()) {
       return failure(hal::rtc::error_kind::out_of_range);
     }
+    const auto current = read();
+    if (!current || !before(current.value(), value)) {
+      return current ? failure(hal::rtc::error_kind::out_of_range)
+                     : result<void, error_type>::failure(current.error());
+    }
     return write_calendar(year, month, day, hour, minute, second);
   }
 
@@ -144,17 +149,30 @@ public:
     registers_.CR = registers_.CR | control_alarm_interrupt |
                     control_alarm_enable;
     write_protected(true);
+    alarm_deadline_ = value;
+    alarm_armed_ = true;
     return result<void, error_type>::success();
   }
 
   [[nodiscard]] bool alarm_pending() noexcept {
-    return (registers_.SR & flag_alarm) != 0U;
+    if (!alarm_armed_ || (registers_.SR & flag_alarm) == 0U) {
+      return false;
+    }
+    const auto current = read();
+    if (!current || before(current.value(), alarm_deadline_)) {
+      clear_alarm_flag();
+      return false;
+    }
+    return true;
   }
 
   void clear_alarm() noexcept {
     write_protected(false);
-    registers_.SCR = flag_alarm;
+    registers_.CR =
+        registers_.CR & ~(control_alarm_enable | control_alarm_interrupt);
+    clear_alarm_flag();
     write_protected(true);
+    alarm_armed_ = false;
   }
 
 private:
@@ -167,6 +185,15 @@ private:
   static constexpr std::uint32_t control_alarm_interrupt{1U << 12U};
   static constexpr std::uint32_t control_format_12_hour{1U << 6U};
   static constexpr std::uint32_t time_pm{1U << 22U};
+
+  [[nodiscard]] static constexpr bool before(hal::utc_time left,
+                                             hal::utc_time right) noexcept {
+    return left.seconds < right.seconds ||
+           (left.seconds == right.seconds &&
+            left.nanoseconds < right.nanoseconds);
+  }
+
+  void clear_alarm_flag() noexcept { registers_.SCR = flag_alarm; }
 
   [[nodiscard]] static constexpr unsigned bcd_to_binary(std::uint32_t value)
       noexcept {
@@ -287,6 +314,8 @@ private:
 
   Registers &registers_;
   poll_budget timeout_{};
+  hal::utc_time alarm_deadline_{};
+  bool alarm_armed_{};
 };
 
 } // namespace hal::stm32g4::rtc

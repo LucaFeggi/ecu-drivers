@@ -11,7 +11,6 @@
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
-#include <hal/mcu/esp32s3_wroom_1_n16r8/memory.hpp>
 #include <hal/foundation/result.hpp>
 #include <hal/foundation/span.hpp>
 #include <hal/register_access.hpp>

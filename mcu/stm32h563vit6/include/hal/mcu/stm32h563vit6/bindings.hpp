@@ -2,6 +2,8 @@
 
 #include <stm32h563xx.h>
 
+// This file maps reusable driver register roles to CMSIS register types. It
+// contains no board-level routing or initialization policy.
 namespace hal::stm32h5::device::stm32h563vit6::binding {
 
 using adc_registers = ADC_TypeDef;
@@ -21,4 +23,4 @@ using rtc_registers = RTC_TypeDef;
 using watchdog_registers = IWDG_TypeDef;
 using ethernet_registers = ETH_TypeDef;
 
-} // namespace hal::stm32h5::device::stm32h563vit6::binding
+}  // namespace hal::stm32h5::device::stm32h563vit6::binding

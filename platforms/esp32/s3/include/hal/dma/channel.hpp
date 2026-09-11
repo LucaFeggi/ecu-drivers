@@ -2,7 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <hal/mcu/esp32s3_wroom_1_n16r8/dma.hpp>
+#include <hal/dma/descriptor.hpp>
 #include <hal/register_access.hpp>
 #include <soc/gdma_struct.h>
 
@@ -148,20 +148,21 @@ class Channel {
   return static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(object));
 }
 
-inline void make_tx_descriptor(device::gdma_descriptor& descriptor,
+inline void make_tx_descriptor(hal::esp32s3::dma::descriptor& descriptor,
                                const void* buffer, std::size_t size,
                                bool successful_eof = true) noexcept {
-  descriptor.control = device::descriptor_control(
+  descriptor.control = hal::esp32s3::dma::descriptor_control(
       size, size, true, successful_eof);
   descriptor.buffer_address = address(buffer);
   descriptor.next_descriptor = 0U;
 }
 
-inline void make_rx_descriptor(device::gdma_descriptor& descriptor, void* buffer,
+inline void make_rx_descriptor(hal::esp32s3::dma::descriptor& descriptor,
+                               void* buffer,
                                std::size_t capacity,
                                bool successful_eof = true) noexcept {
   const std::size_t dma_size = (capacity + 3U) & ~std::size_t{3U};
-  descriptor.control = device::descriptor_control(
+  descriptor.control = hal::esp32s3::dma::descriptor_control(
       dma_size, 0U, true, successful_eof);
   descriptor.buffer_address = address(buffer);
   descriptor.next_descriptor = 0U;

@@ -167,38 +167,39 @@ void test_mount_write_recovery_and_compaction() {
 }
 
 void test_torn_record_is_ignored() {
-  TestFlash flash{};
-  std::array<std::byte, 64U> mount_mirror{};
-  auto mounted = Memory::mount(flash, mount_mirror);
-  check(mounted.has_value());
-  if (!mounted) {
-    return;
-  }
-
   const std::array<std::byte, 4U> committed{std::byte{1U}, std::byte{2U},
                                             std::byte{3U}, std::byte{4U}};
-  check(mounted.value().write(0U, committed).has_value());
-  check(mounted.value().sync().has_value());
-
-  // A record programs its header first and payload second. Failing the
-  // payload leaves no commit marker, so recovery must retain the earlier
-  // value.
-  flash.fail_on_program_call(flash.program_calls() + 2U);
   const std::array<std::byte, 4U> torn{std::byte{9U}, std::byte{9U},
                                        std::byte{9U}, std::byte{9U}};
-  auto failed_write = mounted.value().write(0U, torn);
-  check(!failed_write);
-  flash.clear_failure();
+  // A four-byte record uses three program operations: header, payload, and
+  // commit marker. Simulate loss of power at each boundary; no uncommitted
+  // bytes may replace the prior value after remount.
+  for (std::size_t cut = 1U; cut <= 3U; ++cut) {
+    TestFlash flash{};
+    std::array<std::byte, 64U> mount_mirror{};
+    auto mounted = Memory::mount(flash, mount_mirror);
+    check(mounted.has_value());
+    if (!mounted) {
+      continue;
+    }
+    check(mounted.value().write(0U, committed).has_value());
+    check(mounted.value().sync().has_value());
 
-  std::array<std::byte, 64U> recovery_mirror{};
-  auto recovered = Memory::mount(flash, recovery_mirror);
-  check(recovered.has_value());
-  if (!recovered) {
-    return;
+    flash.fail_on_program_call(flash.program_calls() + cut);
+    auto failed_write = mounted.value().write(0U, torn);
+    check(!failed_write);
+    flash.clear_failure();
+
+    std::array<std::byte, 64U> recovery_mirror{};
+    auto recovered = Memory::mount(flash, recovery_mirror);
+    check(recovered.has_value());
+    if (!recovered) {
+      continue;
+    }
+    std::array<std::byte, 4U> output{};
+    check(recovered.value().read(0U, output).has_value());
+    check(output == committed);
   }
-  std::array<std::byte, 4U> output{};
-  check(recovered.value().read(0U, output).has_value());
-  check(output == committed);
 }
 
 }  // namespace

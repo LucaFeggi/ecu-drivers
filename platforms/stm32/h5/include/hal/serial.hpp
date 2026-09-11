@@ -189,6 +189,8 @@ public:
     registers_.CR3 |= rx_dma;
     prepare_rx();
     rx_consumed_ = 0U;
+    fault_.store(static_cast<std::uint32_t>(hal::serial::error_kind::other),
+                 std::memory_order_release);
     configured_ = true;
     return result;
   }
@@ -198,8 +200,10 @@ public:
     HAL_CORE_ASSERT(data.valid());
     if (!configured_ || !data.valid())
       return failure<std::size_t>(hal::serial::error_kind::configuration);
+    if (fault() != hal::serial::error_kind::other)
+      return failure<std::size_t>(fault());
     const auto count = data.size() < TxCapacity ? data.size() : TxCapacity;
-    if (count == 0U || tx_.CCR != 0U)
+    if (count == 0U || (tx_.CCR & dma_enable) != 0U)
       return result<std::size_t, error_type>::success(0U);
     for (std::size_t i = 0U; i < count; ++i)
       tx_storage_[i] = data[i];
@@ -214,6 +218,8 @@ public:
     HAL_CORE_ASSERT(data.valid());
     if (!configured_ || !data.valid())
       return failure<std::size_t>(hal::serial::error_kind::configuration);
+    if (fault() != hal::serial::error_kind::other)
+      return failure<std::size_t>(fault());
     const auto status = registers_.ISR;
     if ((status & overrun_error) != 0U)
       return failure<std::size_t>(hal::serial::error_kind::overrun);
@@ -231,6 +237,8 @@ public:
   }
 
   [[nodiscard]] auto flush() -> result<void, error_type> {
+    if (fault() != hal::serial::error_kind::other)
+      return failure<void>(fault());
     for (std::uint32_t left = timeout_.iterations; left > 0U; --left) {
       if (tx_.CBR1 == 0U && (registers_.ISR & transmission_complete) != 0U) {
         registers_.CR3 &= ~tx_dma;
@@ -239,14 +247,31 @@ public:
     }
     return failure<void>(hal::serial::error_kind::timeout);
   }
-  void on_tx_dma_interrupt() noexcept {
+  void on_tx_dma_interrupt(bool transfer_error = false) noexcept {
     tx_.CCR &= ~dma_enable;
     registers_.CR3 &= ~tx_dma;
+    if (transfer_error)
+      fault_.store(static_cast<std::uint32_t>(hal::serial::error_kind::io),
+                   std::memory_order_release);
   }
-  void on_rx_dma_interrupt() noexcept {}
+  void on_rx_dma_interrupt(bool transfer_error = false) noexcept {
+    if (transfer_error) {
+      rx_.CCR &= ~dma_enable;
+      registers_.CR3 &= ~rx_dma;
+      fault_.store(static_cast<std::uint32_t>(hal::serial::error_kind::io),
+                   std::memory_order_release);
+    }
+  }
+  [[nodiscard]] hal::serial::error_kind fault() const noexcept {
+    return static_cast<hal::serial::error_kind>(
+        fault_.load(std::memory_order_acquire));
+  }
 
 private:
   static constexpr std::uint32_t dma_enable{1U};
+  static constexpr std::uint32_t dma_transfer_complete_interrupt{1U << 8U};
+  static constexpr std::uint32_t dma_error_interrupts{
+      (1U << 10U) | (1U << 11U) | (1U << 12U) | (1U << 14U)};
   static constexpr std::uint32_t rx_dma{1U << 6U};
   static constexpr std::uint32_t tx_dma{1U << 7U};
   static constexpr std::uint32_t transmission_complete{1U << 6U};
@@ -275,7 +300,8 @@ private:
     channel.CDAR = static_cast<std::uint32_t>(
         reinterpret_cast<std::uintptr_t>(destination));
     barrier();
-    channel.CCR = dma_enable;
+    channel.CCR = dma_enable | dma_transfer_complete_interrupt |
+                  dma_error_interrupts;
   }
   void prepare_rx() noexcept {
     configure_channel(rx_, rx_request_, &registers_.RDR, rx_storage_.data(),
@@ -291,6 +317,7 @@ private:
   std::array<std::byte, RxCapacity> &rx_storage_;
   poll_budget timeout_{};
   std::size_t rx_consumed_{};
+  std::atomic<std::uint32_t> fault_{};
   bool configured_{};
 };
 

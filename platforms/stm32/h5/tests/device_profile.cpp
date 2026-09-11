@@ -1,6 +1,7 @@
 #include <array>
 #include <hal/mcu/stm32h563vit6/bindings.hpp>
-#include <hal/mcu/stm32h563vit6/capabilities.hpp>
+#include <hal/mcu/stm32h563vit6/device.hpp>
+#include <hal/mcu/stm32h563vit6/dma.hpp>
 #include <hal/adc.hpp>
 #include <hal/block.hpp>
 #include <hal/can.hpp>
@@ -60,6 +61,11 @@ static_assert(hal::gpio::EdgeInput<hal::stm32h5::gpio::EdgeInput<
                                 binding::dma_channel_registers, 32U, 64U>
       serial_driver{serial, dma, dma, 64'000'000U, 1U, 2U, tx, rx};
   (void)serial_driver.configure({hal::hertz{115'200U}});
+  (void)serial_driver.try_write({tx.data(), 1U});
+  (void)serial_driver.try_read({rx.data(), 1U});
+  serial_driver.on_tx_dma_interrupt(true);
+  serial_driver.on_rx_dma_interrupt(true);
+  (void)serial_driver.fault();
 
   binding::spi_registers spi{};
   std::array<std::byte, 32U> spi_tx{};
@@ -106,10 +112,19 @@ static_assert(hal::gpio::EdgeInput<hal::stm32h5::gpio::EdgeInput<
   (void)output.write(hal::gpio::level::low);
   hal::stm32h5::gpio::EdgeInput edge{gpio, exti, 1U, 0U};
   (void)edge.configure_edge(hal::gpio::edge::rising);
+
+  binding::rtc_registers rtc{};
+  hal::stm32h5::rtc::Clock<binding::rtc_registers> rtc_driver{
+      rtc, hal::stm32h5::poll_budget{10U}};
+  (void)rtc_driver.read();
+  (void)rtc_driver.set(hal::utc_time{});
+  (void)rtc_driver.set_alarm(hal::utc_time{});
+  (void)rtc_driver.alarm_pending();
+  rtc_driver.clear_alarm();
 }
 
 static_assert(
-    hal::stm32h5::device::stm32h563vit6::capabilities::gpdma_instances == 2U);
+    hal::stm32h5::device::stm32h563vit6::gpdma_controller_count == 2U);
 } // namespace
 
 int main() {

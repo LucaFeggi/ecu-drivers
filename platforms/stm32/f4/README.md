@@ -1,4 +1,4 @@
-# hal-target-stm32f4
+# STM32F4 platform
 
 Direct-register STM32F4 target drivers. Exact device bindings and package facts
 are supplied separately by the selected chip profile.

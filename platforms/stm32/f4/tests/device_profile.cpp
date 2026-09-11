@@ -1,6 +1,6 @@
 #include <array>
 #include <hal/mcu/stm32f446vet6/bindings.hpp>
-#include <hal/mcu/stm32f446vet6/capabilities.hpp>
+#include <hal/mcu/stm32f446vet6/device.hpp>
 #include <hal/adc.hpp>
 #include <hal/block.hpp>
 #include <hal/can.hpp>
@@ -60,6 +60,11 @@ static_assert(hal::gpio::EdgeInput<hal::stm32f4::gpio::EdgeInput<
                                 binding::dma_stream_registers, 32U, 64U>
       serial_driver{serial, stream, stream, 45'000'000U, 4U, 4U, tx, rx};
   (void)serial_driver.configure({hal::hertz{115'200U}});
+  (void)serial_driver.try_write({tx.data(), 1U});
+  (void)serial_driver.try_read({rx.data(), 1U});
+  serial_driver.on_tx_dma_interrupt(true);
+  serial_driver.on_rx_dma_interrupt(true);
+  (void)serial_driver.fault();
 
   binding::spi_registers spi{};
   std::array<std::byte, 32U> spi_tx{};
@@ -109,9 +114,70 @@ static_assert(hal::gpio::EdgeInput<hal::stm32f4::gpio::EdgeInput<
 
 static_assert(
     hal::stm32f4::device::stm32f446vet6::capabilities::can_instances == 2U);
+
+[[nodiscard]] int test_receive_sequences() {
+  auto receive = []<std::size_t Count>() {
+    binding::i2c_registers registers{};
+    registers.SR1 = (1U << 0U) | (1U << 1U) | (1U << 2U) | (1U << 6U) |
+                    (1U << 7U);
+    hal::stm32f4::i2c::Controller<binding::i2c_registers> controller{
+        registers,
+        {45'000'000U, 100'000U, hal::stm32f4::poll_budget{10U}, false}};
+    std::array<std::byte, Count> data{};
+    const auto initialized = controller.initialize();
+    const auto received = hal::i2c::read(
+        controller, hal::i2c::address7{0x10U},
+        hal::span<std::byte>{data.data(), data.size()});
+    constexpr std::uint32_t stop = 1U << 9U;
+    constexpr std::uint32_t ack = 1U << 10U;
+    constexpr std::uint32_t pos = 1U << 11U;
+    return initialized && received && (registers.CR1 & stop) != 0U &&
+           (registers.CR1 & ack) != 0U && (registers.CR1 & pos) == 0U;
+  };
+
+  if (!receive.template operator()<1U>()) return 1;
+  if (!receive.template operator()<2U>()) return 2;
+  if (!receive.template operator()<4U>()) return 3;
+  return 0;
+}
+
+[[nodiscard]] int test_spi_enable_and_cleanup() {
+  binding::spi_registers polling_registers{};
+  polling_registers.SR = (1U << 0U) | (1U << 1U);
+  hal::stm32f4::spi::PollingBus8 polling{
+      polling_registers, 45'000'000U, hal::stm32f4::poll_budget{10U}};
+  std::array<std::byte, 1U> byte{std::byte{0x5AU}};
+  if (!polling.configure({hal::hertz{1'000'000U}}) ||
+      !polling.transfer(byte, byte) ||
+      (polling_registers.CR1 & (1U << 6U)) != 0U) {
+    return 4;
+  }
+
+  binding::spi_registers dma_registers{};
+  binding::dma_stream_registers tx_stream{};
+  binding::dma_stream_registers rx_stream{};
+  std::array<std::byte, 4U> tx{};
+  std::array<std::byte, 4U> rx{};
+  hal::stm32f4::spi::DmaBus8<binding::spi_registers,
+                              binding::dma_stream_registers,
+                              binding::dma_stream_registers, 4U>
+      dma{dma_registers, tx_stream, rx_stream, 45'000'000U,
+          hal::stm32f4::poll_budget{2U}, 0U, 0U, tx, rx};
+  const auto configured = dma.configure({hal::hertz{1'000'000U}});
+  const auto timed_out = dma.transfer(tx, rx);
+  if (!configured || timed_out ||
+      timed_out.error().kind() != hal::spi::error_kind::timeout ||
+      (tx_stream.CR & 1U) != 0U || (rx_stream.CR & 1U) != 0U ||
+      (dma_registers.CR1 & (1U << 6U)) != 0U ||
+      (dma_registers.CR2 & 3U) != 0U) {
+    return 5;
+  }
+  return 0;
+}
 } // namespace
 
 int main() {
   instantiate();
-  return 0;
+  const int receive = test_receive_sequences();
+  return receive == 0 ? test_spi_enable_and_cleanup() : receive;
 }

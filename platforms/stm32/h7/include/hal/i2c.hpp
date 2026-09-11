@@ -252,7 +252,12 @@ private:
         return failure(hal::i2c::error_kind::io);
       }
       barrier();
-      registers_.CR2 = registers_.CR2 | cr2_start;
+      // START is only legal for the first chunk. When RELOAD is active the
+      // peripheral holds SCL low at TCR; rewriting NBYTES/RELOAD releases the
+      // same transfer and must not synthesize another address phase.
+      if (offset == 0U) {
+        registers_.CR2 = registers_.CR2 | cr2_start;
+      }
 
       auto outcome = use_dma()
                          ? wait_dma_completion()

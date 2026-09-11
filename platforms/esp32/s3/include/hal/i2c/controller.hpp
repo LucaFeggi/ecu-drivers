@@ -191,7 +191,9 @@ class Controller {
         }
         if constexpr (std::same_as<Address, hal::i2c::address7>) {
           const std::byte address_byte = static_cast<std::byte>(
-              static_cast<std::uint8_t>((address.value << 1U) | direction));
+              static_cast<std::uint8_t>(
+                  (static_cast<std::uint32_t>(address.value) << 1U) |
+                  static_cast<std::uint32_t>(direction)));
           if (tx_count >= tx_fifo.size()) {
             return result<void, error_type>::failure(error_type::configuration());
           }

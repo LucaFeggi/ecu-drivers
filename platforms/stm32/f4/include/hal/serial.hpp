@@ -10,6 +10,7 @@
 #endif
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include "support.hpp"
@@ -146,6 +147,8 @@ public:
     configure_stream(rx_, rx_channel_, &registers_.DR, rx_buffer_.data(),
                      RxCapacity, false, false, true);
     rx_consumed_ = 0U;
+    fault_.store(static_cast<std::uint32_t>(hal::serial::error_kind::other),
+                 std::memory_order_release);
     registers_.CR3 |= (1U << 6U);
     configured_ = true;
     return result;
@@ -155,6 +158,8 @@ public:
     HAL_CORE_ASSERT(data.valid());
     if (!configured_ || !data.valid())
       return failure<std::size_t>(hal::serial::error_kind::configuration);
+    if (fault() != hal::serial::error_kind::other)
+      return failure<std::size_t>(fault());
     const auto count = data.size() < TxCapacity ? data.size() : TxCapacity;
     if (count == 0U || (tx_.CR & 1U) != 0U)
       return result<std::size_t, error_type>::success(0U);
@@ -170,6 +175,8 @@ public:
     HAL_CORE_ASSERT(data.valid());
     if (!configured_ || !data.valid())
       return failure<std::size_t>(hal::serial::error_kind::configuration);
+    if (fault() != hal::serial::error_kind::other)
+      return failure<std::size_t>(fault());
     const auto count = data.size() < RxCapacity ? data.size() : RxCapacity;
     const auto produced = RxCapacity - rx_.NDTR;
     const auto available = produced - rx_consumed_;
@@ -185,6 +192,8 @@ public:
     return result<std::size_t, error_type>::success(copy);
   }
   [[nodiscard]] auto flush() -> result<void, error_type> {
+    if (fault() != hal::serial::error_kind::other)
+      return failure<void>(fault());
     for (std::uint32_t n = timeout_.iterations; n > 0U; --n)
       if ((tx_.NDTR == 0U) && ((registers_.SR & (1U << 6U)) != 0U)) {
         tx_.CR &= ~1U;
@@ -193,11 +202,25 @@ public:
       }
     return failure<void>(hal::serial::error_kind::timeout);
   }
-  void on_tx_dma_interrupt() noexcept {
+  void on_tx_dma_interrupt(bool transfer_error = false) noexcept {
     tx_.CR &= ~1U;
     registers_.CR3 &= ~(1U << 7U);
+    if (transfer_error)
+      fault_.store(static_cast<std::uint32_t>(hal::serial::error_kind::io),
+                   std::memory_order_release);
   }
-  void on_rx_dma_interrupt() noexcept {}
+  void on_rx_dma_interrupt(bool transfer_error = false) noexcept {
+    if (transfer_error) {
+      rx_.CR &= ~1U;
+      registers_.CR3 &= ~(1U << 6U);
+      fault_.store(static_cast<std::uint32_t>(hal::serial::error_kind::io),
+                   std::memory_order_release);
+    }
+  }
+  [[nodiscard]] hal::serial::error_kind fault() const noexcept {
+    return static_cast<hal::serial::error_kind>(
+        fault_.load(std::memory_order_acquire));
+  }
 
 private:
   template <class T>
@@ -234,6 +257,7 @@ private:
   std::array<std::byte, RxCapacity> &rx_buffer_;
   poll_budget timeout_{};
   std::size_t rx_consumed_{};
+  std::atomic<std::uint32_t> fault_{};
   bool configured_{};
 };
 } // namespace hal::stm32f4::serial

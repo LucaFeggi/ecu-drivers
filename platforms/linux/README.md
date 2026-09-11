@@ -1,4 +1,4 @@
-# hal-target-linux
+# Linux platform
 
 Linux UAPI-backed drivers for the portable HAL contracts in `ecu-drivers`.
 

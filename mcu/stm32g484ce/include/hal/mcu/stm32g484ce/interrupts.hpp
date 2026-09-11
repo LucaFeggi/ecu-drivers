@@ -4,6 +4,8 @@
 
 namespace hal::stm32g4::device::stm32g484ce {
 
+// Only interrupt numbers consumed by reusable drivers are published here.
+// Vector installation and priority remain BSP policy.
 namespace interrupt_number {
 inline constexpr std::int32_t dma1_channel1{11};
 inline constexpr std::int32_t dma1_channel2{12};
@@ -52,6 +54,6 @@ inline constexpr std::int32_t dma1_channel8{96};
 inline constexpr std::int32_t dma2_channel6{97};
 inline constexpr std::int32_t dma2_channel7{98};
 inline constexpr std::int32_t dma2_channel8{99};
-} // namespace interrupt_number
+}  // namespace interrupt_number
 
-} // namespace hal::stm32g4::device::stm32g484ce
+}  // namespace hal::stm32g4::device::stm32g484ce
