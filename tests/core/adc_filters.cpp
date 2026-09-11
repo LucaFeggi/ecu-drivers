@@ -1,7 +1,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <hal/adc.hpp>
+#include <hal/contracts/adc.hpp>
 
 namespace {
 

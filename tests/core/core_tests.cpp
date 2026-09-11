@@ -1,12 +1,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <hal/can.hpp>
+#include <hal/contracts/can.hpp>
 #include <hal/foundation/crc32.hpp>
 #include <hal/foundation/result.hpp>
 #include <hal/foundation/span.hpp>
-#include <hal/i2c.hpp>
-#include <hal/spi.hpp>
+#include <hal/contracts/i2c.hpp>
+#include <hal/contracts/spi.hpp>
 #include <utility>
 
 namespace {

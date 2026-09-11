@@ -10,6 +10,9 @@
 [submodule "third_party/cmsis-device-h7"]
 	path = third_party/cmsis-device-h7
 	url = https://github.com/STMicroelectronics/cmsis-device-h7.git
+[submodule "third_party/cmsis-device-g4"]
+	path = third_party/cmsis-device-g4
+	url = https://github.com/STMicroelectronics/cmsis-device-g4.git
 [submodule "third_party/esp-idf"]
 	path = third_party/esp-idf
 	url = https://github.com/espressif/esp-idf.git

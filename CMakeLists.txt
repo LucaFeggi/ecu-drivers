@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(ecu-drivers VERSION 0.1.0 LANGUAGES CXX)
+project(ecu-drivers LANGUAGES CXX)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -39,12 +39,6 @@ set_target_properties(hal-devices PROPERTIES EXPORT_NAME devices)
 target_compile_features(hal-devices INTERFACE cxx_std_20)
 target_link_libraries(hal-devices INTERFACE hal::core)
 
-add_library(hal-sim INTERFACE)
-add_library(hal::sim ALIAS hal-sim)
-set_target_properties(hal-sim PROPERTIES EXPORT_NAME sim)
-target_compile_features(hal-sim INTERFACE cxx_std_20)
-target_link_libraries(hal-sim INTERFACE hal::core)
-
 option(ECU_DRIVERS_BUILD_TESTS "Build ecu-drivers tests" ${PROJECT_IS_TOP_LEVEL})
 option(ECU_DRIVERS_ENABLE_SANITIZERS
        "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
@@ -55,40 +49,45 @@ if(ECU_DRIVERS_BUILD_TESTS)
     include(CTest)
 endif()
 
-add_subdirectory(targets/linux)
-add_subdirectory(targets/stm32f4)
-add_subdirectory(targets/stm32h5)
-add_subdirectory(targets/stm32h7)
-add_subdirectory(targets/esp32s3)
+add_subdirectory(platforms/linux)
+add_subdirectory(platforms/stm32/f4)
+add_subdirectory(platforms/stm32/h5)
+add_subdirectory(platforms/stm32/h7)
+add_subdirectory(platforms/stm32/g4)
+add_subdirectory(platforms/esp32/s3)
 add_subdirectory(devices)
-add_subdirectory(sim)
 
 if(ECU_DRIVERS_BUILD_TESTS AND BUILD_TESTING)
     add_subdirectory(tests/core)
 endif()
 
 install(TARGETS
-    hal-core
-    hal-devices
-    hal-sim
     hal-target-linux
-    hal-target-stm32f4
     hal-target-stm32f446vet6
-    hal-target-stm32h5
     hal-target-stm32h563vit6
-    hal-target-stm32h7
     hal-target-stm32h723vgt6
-    hal-target-esp32s3
+    hal-target-stm32g484ce
     hal-target-esp32s3-wroom-1-n16r8
     EXPORT ecuDriversTargets)
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-foreach(_target stm32f4 stm32h5 stm32h7 esp32s3 linux)
-    install(DIRECTORY targets/${_target}/include/
+install(DIRECTORY devices/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(DIRECTORY mcu/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.hpp")
+foreach(_platform
+        platforms/linux
+        platforms/esp32/s3
+        platforms/stm32/f4
+        platforms/stm32/g4
+        platforms/stm32/h5
+        platforms/stm32/h7)
+    install(DIRECTORY ${_platform}/include/
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 endforeach()
-install(DIRECTORY targets/esp32s3/generated/
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/platforms/esp32/s3/generated")
+    install(DIRECTORY platforms/esp32/s3/generated/
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 install(FILES LICENSE README.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
 install(FILES docs/System_Architecture.md
@@ -102,11 +101,6 @@ configure_package_config_file(
     cmake/ecu-driversConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/ecu-driversConfig.cmake
     INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ecu-drivers)
-write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/ecu-driversConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion)
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/ecu-driversConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/ecu-driversConfigVersion.cmake
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ecu-drivers)
