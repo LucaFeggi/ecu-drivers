@@ -33,6 +33,133 @@ The `devices/` layer contains reusable external-device drivers such as the
 ST7735 display driver. It depends on portable contracts only; it does not
 select MCU peripherals, pins, boards, or RTOS services.
 
+## Why the architecture looks this way
+
+This document also preserves the design path that led to the implementation.
+The original architecture study was intentionally comparative: the project
+needed a portable C++ interface, but also needed predictable embedded behavior,
+static resource ownership, and access to target-specific features. No existing
+HAL was copied wholesale because each reviewed project optimizes for a
+different boundary (Rust generic drivers, a full RTOS, binary interoperability,
+or runtime extensibility).
+
+The central conclusion was that “portable” should describe the semantics used
+by a driver, not pretend that unrelated MCUs have identical registers or
+capabilities. C++20 concepts therefore describe contracts, while concrete
+stateful target objects implement them. Target and board choices are made at
+build/composition time, so unsupported combinations fail through types,
+concepts, or target facts rather than a runtime target switch.
+
+The main decisions were:
+
+- Use concepts and static dispatch instead of an inheritance hierarchy,
+  function-table API, or virtual interface. This keeps the call graph visible,
+  avoids vtables, and permits optimization without requiring a global heap.
+- Keep contracts small and consumer-oriented. GPIO, I2C, SPI, CAN, serial,
+  storage, and similar APIs express operations that reusable device drivers
+  actually need; unusual peripheral features remain target extensions.
+- Model I2C as transactions so repeated-start and stop behavior cannot be lost
+  in vendor-specific flags. Model SPI as a shared bus plus a device transaction
+  that owns chip-select and bus exclusivity.
+- Keep configuration and intent separate from register layouts. Family drivers
+  own register-level mechanics; exact profiles own device facts; BSP/composition
+  owns pins, clocks, DMA, interrupts, cache policy, and external wiring.
+- Make storage and failures explicit. Normal objects use caller-owned or
+  automatic storage, `hal::result` reports operational errors, and blocking
+  operations have bounded progress/timeout rules. Startup failure and an
+  invariant violation are separate from an ordinary runtime error.
+- Keep FreeRTOS above the library. Tasks, queues, notifications, and safe-state
+  policy belong to firmware composition; drivers expose explicit service/ISR
+  boundaries and do not call the RTOS merely to notify application code.
+- Treat DMA/cache coherency, interrupt context, buffer lifetime, and peripheral
+  ownership as part of the contract. These details are especially important on
+  Cortex-M7 targets and cannot be hidden behind a generic “DMA-capable” label.
+
+### Alternatives reviewed and what was retained
+
+The historical study reviewed Rust `embedded-hal`, modm, libhal, Zephyr,
+CMSIS-Driver, RIOT, TinyUSB, C++20 concepts/customization mechanisms, and
+freestanding C++ constraints. The resulting choices were deliberately
+selective:
+
+- `embedded-hal` supplied the strongest semantic reference: generic external
+  device drivers, unified I2C/SPI transaction concepts, separate execution
+  models, and the rule that a new contract should be proven on multiple
+  platforms with a generic consumer.
+- modm demonstrated why generated target facts, static allocation, and
+  compile-time pin/peripheral validation scale better than handwritten macro
+  trees.
+- Zephyr contributed the separation of immutable device configuration, runtime
+  state, and board description, but its runtime API tables were rejected.
+- CMSIS-Driver contributed disciplined naming, capability/error vocabulary,
+  and validation-suite thinking, but its Access Struct function-pointer
+  dispatch was rejected.
+- libhal contributed layering, adapters, and explicit ownership; virtual
+  interfaces, reference-counted resource management, and async-first design
+  were outside this project's V1 constraints.
+- RIOT reinforced explicit SPI bus acquisition and release. TinyUSB reinforced
+  isolating low-level controller code and keeping complex interrupt work out of
+  the ISR.
+
+This explains several intentional omissions: there is no universal `Timer`,
+raw NOR flash is not presented as EEPROM, CAN FD is a refinement of classical
+CAN, and runtime `supports_x()` checks are not used for capabilities known at
+build time. These are design boundaries, not missing abstractions.
+
+### How the design was refined into the current repository
+
+The early baseline focused on STM32H7, ESP32-S3, Linux, and a proposed
+deterministic simulation backend. Implementation and review exposed the need
+for reusable STM32 family packages, so STM32F4, G4, and H5 were added with
+their materially different DMA, CAN, ADC, SDMMC, and Ethernet mechanisms.
+The current repository is authoritative: Linux is an integration backend and
+there is no `sim` backend in this checkout. The simulation idea remains a
+possible future project, not a current layer or supported CMake target.
+
+The same refinement moved complete C++ declarations into
+`include/hal/<area>/` headers. This Markdown file records semantics and
+rationale; the headers are the source of truth for signatures. Contract tests,
+adapter tests, install-tree consumer tests, and register-model validation now
+provide evidence at different boundaries rather than treating architecture
+prose as proof.
+
+## Design workflow and implementation checkpoints
+
+The intended workflow was:
+
+1. Start from the reusable driver's required behavior, not from a vendor HAL.
+2. Compare at least two materially different implementations and document
+   where the proposed contract breaks down.
+3. Write the semantic contract: ownership, blocking and timeout behavior,
+   ISR/thread rules, buffer lifetime, error meaning, and post-failure state.
+4. Implement the portable header and its compile-time/host contract tests.
+5. Implement target family mechanics and bind them to exact MCU/module facts.
+6. Add BSP/composition validation for physical resources, DMA, interrupts,
+   memory placement, and cache policy.
+7. Validate installation boundaries and generated code/register models before
+   claiming hardware support; reserve `hil_validated` for a real flashed
+   fixture.
+
+This sequence is why the repository has separate `include/hal/contracts`,
+`platforms`, `mcu`, `devices`, and test layers. It also makes future changes
+auditable: if a backend proves a contract wrong, update the contract, evidence,
+and tests together while retaining the reason for the change in history.
+
+## Research resources
+
+The architecture was informed by the following primary resources. They are
+kept here so a future maintainer can reconstruct the reasoning rather than
+only see the final directory tree:
+
+- [embedded-hal migration rationale](https://github.com/rust-embedded/embedded-hal/blob/master/docs/migrating-from-0.2-to-1.0.md), [adding a new trait](https://github.com/rust-embedded/embedded-hal/blob/master/docs/how-to-add-a-new-trait.md), [I2C](https://docs.rs/embedded-hal/latest/embedded_hal/i2c/trait.I2c.html), and [SPI](https://docs.rs/embedded-hal/latest/embedded_hal/spi/index.html)
+- [modm architecture](https://modm.io/how-modm-works/), [libhal fundamentals](https://libhal.github.io/5.0/user_guide/fundamentals/), [Zephyr device model](https://docs.zephyrproject.org/latest/kernel/drivers/index.html) and [Devicetree](https://docs.zephyrproject.org/latest/build/dts/index.html)
+- [CMSIS-Driver](https://arm-software.github.io/CMSIS_6/main/Driver/index.html), [RIOT SPI API](https://api.riot-os.org/group__drivers__periph__spi.html), and [TinyUSB architecture](https://docs.tinyusb.org/en/latest/reference/architecture.html)
+- [C++20 concepts](https://en.cppreference.com/cpp/language/constraints), [freestanding C++](https://en.cppreference.com/cpp/freestanding), [`std::span`](https://en.cppreference.com/cpp/container/span), and WG21 [customization mechanisms](https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2021/p2279r0.html)
+- [STM32H723VG documentation](https://www.st.com/en/microcontrollers-microprocessors/stm32h723vg), [STM32H7 reference/documentation hub](https://www.st.com/en/microcontrollers-microprocessors/stm32h723-733/documentation.html), [STM32H7 cache/DMA guidance](https://www.st.com/resource/en/application_note/an4839-level-1-cache-on-stm32f7-series-and-stm32h7-series-stmicroelectronics.pdf), and [STM32CubeH7](https://github.com/STMicroelectronics/STM32CubeH7)
+- [ESP32-S3 module datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf), [ESP-IDF](https://github.com/espressif/esp-idf), and [TWAI documentation](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/twai.html)
+- Linux [SocketCAN](https://docs.kernel.org/networking/can.html), [GPIO character device](https://docs.kernel.org/userspace-api/gpio/chardev.html), [spidev](https://docs.kernel.org/spi/spidev.html), [I2C userspace](https://docs.kernel.org/i2c/dev-interface.html), [IIO buffers](https://docs.kernel.org/iio/iio_devbuf.html), and [TUN/TAP](https://docs.kernel.org/networking/tuntap.html)
+- [NXP UM10204 I2C specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf), [Open-CMSIS-SVD](https://open-cmsis-pack.github.io/svd-spec/latest/index.html), [AUTOSAR C++14 guidelines](https://www.autosar.org/fileadmin/standards/R22-11/AP/AUTOSAR_RS_CPP14Guidelines.pdf), and the [CMake Presets manual](https://cmake.org/cmake/help/latest/manual/cmake-presets.7.html)
+
 ## Repository components
 
 - `include/hal/contracts/` — GPIO, I2C, SPI, serial, CAN, Ethernet, ADC, block,
